@@ -1,4 +1,4 @@
-# Match Maker - Professional Networking Matchmaking App
+# Mr. Bridge - Professional Networking Matchmaking App
 
 A Next.js-based web application that facilitates professional networking by matching attendees at events based on their profiles and interests.
 
@@ -130,7 +130,7 @@ npm run lint
 ## Project Structure
 
 ```
-Match Maker/
+Mr. Bridge/
 ├── app/                          # Next.js app directory
 │   ├── layout.jsx               # Root layout component
 │   ├── page.jsx                 # Home page
