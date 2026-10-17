@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   ensureUser: vi.fn(), setSession: vi.fn(), exchangeCodeForTokens: vi.fn(),
   verifyIdToken: vi.fn(), unsealOAuthState: vi.fn(), sealSession: vi.fn(),
   buildAuthorizationUrl: vi.fn(), sealOAuthState: vi.fn(), verifyToken: vi.fn(),
+  isGoogleSignInEnabled: vi.fn(),
 }));
 
 vi.mock("@match-maker/db", () => ({
@@ -59,6 +60,7 @@ beforeEach(() => {
   mocks.sealSession.mockResolvedValue("sealed-session");
   mocks.buildAuthorizationUrl.mockResolvedValue("http://localhost:8080/realms/match-maker/protocol/openid-connect/auth?kc_idp_hint=google");
   mocks.sealOAuthState.mockResolvedValue("sealed-state");
+  mocks.isGoogleSignInEnabled.mockReturnValue(true);
 });
 
 describe("on-site email and phone login", () => {
@@ -96,6 +98,13 @@ describe("Google sign-in", () => {
     expect(response.cookies.get("mb_oauth")?.value).toBe("sealed-state");
     expect(mocks.buildAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ useGoogleIdp: true }));
     expect(mocks.sealOAuthState).toHaveBeenCalledWith(expect.objectContaining({ returnTo: "/e/demo" }));
+  });
+
+  it("refuses to start Google when it is not configured", async () => {
+    mocks.isGoogleSignInEnabled.mockReturnValue(false);
+    const response = await startGoogle(new NextRequest("http://localhost:3000/api/auth/google/start?returnTo=%2Fe%2Fdemo"));
+    expect(response.headers.get("location")).toBe("http://localhost:3000/login?error=google_unavailable&returnTo=%2Fe%2Fdemo");
+    expect(mocks.buildAuthorizationUrl).not.toHaveBeenCalled();
   });
 
   it("returns a verified invited account to its event with a session", async () => {

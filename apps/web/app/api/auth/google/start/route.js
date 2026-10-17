@@ -8,6 +8,7 @@ import {
   randomUrlSafe,
   sealOAuthState,
   sessionCookieOptions,
+  isGoogleSignInEnabled,
   OAUTH_COOKIE_NAME,
   OAUTH_COOKIE_MAX_AGE,
 } from "@match-maker/auth";
@@ -26,6 +27,9 @@ export async function GET(request) {
   const url = new URL(request.url);
   const email = url.searchParams.get("email")?.toLowerCase().trim() || "";
   const returnTo = safeReturnTo(url.searchParams.get("returnTo"));
+  if (!isGoogleSignInEnabled()) {
+    return NextResponse.redirect(new URL(loginErrorPath("google_unavailable", returnTo), url.origin));
+  }
 
   try {
     // The browser already checked the roster, but that check is advisory —
