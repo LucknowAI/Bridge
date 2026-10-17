@@ -4,11 +4,18 @@ import { upsertParticipant } from "../../src/application/use-cases/upsert-partic
 import { getContainer } from "../../src/composition/container";
 import { Intent } from "../../src/domain/participant/intent";
 import { ValidationError } from "../../src/domain/shared/validation";
-import { getSession } from "../../lib/session";
-import { clearSession } from "../../lib/session";
+import { clearSession, getSession } from "../../lib/session";
+import { runFormAction, type FormState } from "../../lib/form-state";
 import { redirect } from "next/navigation";
 
-export async function saveParticipantProfile(eventSlug: string, formData: FormData) {
+export async function saveParticipantProfile(eventSlug: string, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, async () => {
+    await saveProfile(eventSlug, formData);
+    redirect(`/e/${eventSlug}/matches?saved=1`);
+  });
+}
+
+async function saveProfile(eventSlug: string, formData: FormData) {
   const session = await getSession();
   if (!session) throw new Error("Sign in before saving your profile");
   const container = getContainer();
@@ -24,7 +31,7 @@ export async function saveParticipantProfile(eventSlug: string, formData: FormDa
   }
   const venueZone = nullable(formData.get("venueZone"));
   if (venueZone && !event.zones.includes(venueZone)) throw new ValidationError("venueZone", "Choose a venue zone configured for this event");
-  const profile = await upsertParticipant({
+  await upsertParticipant({
     eventId: event.id,
     attendeeId: session.attendeeId,
     intent: intentValue as Intent,
@@ -37,7 +44,6 @@ export async function saveParticipantProfile(eventSlug: string, formData: FormDa
     yearsOfExperience: parseYears(formData.get("yearsOfExperience")),
     mostImpressiveBuild: nullable(formData.get("mostImpressiveBuild")),
   }, { participants: container.participants, enqueueMatching: container.enqueueEmbedding });
-  return { ok: true, eventSlug, profileName: profile.name };
 }
 
 export async function signOutCurrentUser() {

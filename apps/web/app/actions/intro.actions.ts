@@ -6,8 +6,13 @@ import { respondToIntro } from "../../src/application/use-cases/respond-to-intro
 import { shareVenueZone } from "../../src/application/use-cases/share-venue-zone";
 import { getContainer } from "../../src/composition/container";
 import { getSession } from "../../lib/session";
+import { runFormAction, type FormState } from "../../lib/form-state";
 
-export async function requestParticipantIntro(eventSlug: string, formData: FormData) {
+export async function requestParticipantIntro(eventSlug: string, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, () => requestIntroFor(eventSlug, formData));
+}
+
+async function requestIntroFor(eventSlug: string, formData: FormData) {
   const session = await getSession();
   if (!session) throw new Error("Sign in before requesting an introduction");
   const container = getContainer();
@@ -15,7 +20,7 @@ export async function requestParticipantIntro(eventSlug: string, formData: FormD
   if (!event) throw new Error("Event not found");
   const recipientId = String(formData.get("recipientId") || "");
   if (!recipientId) throw new Error("Choose a participant");
-  const intro = await requestIntro({
+  await requestIntro({
     eventId: event.id,
     requesterId: session.attendeeId,
     recipientId,
@@ -25,17 +30,25 @@ export async function requestParticipantIntro(eventSlug: string, formData: FormD
   redirect(`/e/${eventSlug}/connections?requested=1`);
 }
 
-export async function respondToParticipantIntro(eventSlug: string, introId: string, accept: boolean) {
+export async function respondToParticipantIntro(eventSlug: string, introId: string, accept: boolean, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, () => respondToIntroFor(eventSlug, introId, accept));
+}
+
+async function respondToIntroFor(eventSlug: string, introId: string, accept: boolean) {
   const session = await getSession();
   if (!session) throw new Error("Sign in before responding to introductions");
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
-  const intro = await respondToIntro({ eventId: event.id, introId, actorId: session.attendeeId, accept, eventName: event.name }, container);
+  await respondToIntro({ eventId: event.id, introId, actorId: session.attendeeId, accept, eventName: event.name }, container);
   redirect(`/e/${eventSlug}/connections`);
 }
 
-export async function shareVenueZoneAction(eventSlug: string, introId: string, formData: FormData) {
+export async function shareVenueZoneAction(eventSlug: string, introId: string, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, () => shareZoneFor(eventSlug, introId, formData));
+}
+
+async function shareZoneFor(eventSlug: string, introId: string, formData: FormData) {
   const session = await getSession();
   if (!session) throw new Error("Sign in before sharing your location");
   const container = getContainer();

@@ -4,9 +4,14 @@ import { getMyMatches } from "@/src/application/use-cases/get-my-matches";
 import { requireParticipantEvent } from "@/src/lib/auth";
 import { refreshParticipantMatches } from "../../../../actions/match.actions";
 import { requestParticipantIntro } from "../../../../actions/intro.actions";
+import { ActionForm } from "@/components/ui/form";
 
-export default async function MatchesPage({ params }: { params: Promise<{ eventSlug: string }> }) {
+export default async function MatchesPage({ params, searchParams }: {
+  params: Promise<{ eventSlug: string }>;
+  searchParams: Promise<{ saved?: string; queued?: string }>;
+}) {
   const { eventSlug } = await params;
+  const notice = await searchParams;
   const { session, event, container } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/matches`);
   const viewer = await container.participants.findProfile(event.id, session.attendeeId);
   if (!viewer?.profileComplete) redirect(`/e/${eventSlug}/profile`);
@@ -17,10 +22,12 @@ export default async function MatchesPage({ params }: { params: Promise<{ eventS
     <span style={eyebrow}>YOUR EVENT MATCHES</span>
     <h1>People worth meeting.</h1>
     <p>Matches are ranked for your profile. Contact details stay private until you both accept an introduction.</p>
+    {notice.saved && <p role="status" className="notice">Profile saved. Your matches will update in the background.</p>}
+    {notice.queued && <p role="status" className="notice">Refresh queued. Reload this page in a minute.</p>}
     {!matches.length ? <section style={empty}>
       <h2>Your first matches are on the way.</h2>
       <p>We are embedding your profile and ranking attendees in the background.</p>
-      <form action={refreshParticipantMatches.bind(null, eventSlug)}><button style={button}>Refresh matches</button></form>
+      <ActionForm action={refreshParticipantMatches.bind(null, eventSlug)} label="Refresh matches" pendingLabel="Queuing…" />
     </section> : <div style={list}>
       {matches.map((match, index) => <article key={match.participant.attendeeId} style={card}>
         <div style={rank}>#{index + 1}</div>
@@ -33,10 +40,8 @@ export default async function MatchesPage({ params }: { params: Promise<{ eventS
           <p style={muted}>{match.mutualInterest ? "Your event goals align" : "Suggested for your profile"}</p>
         </div>
         <div style={score}>{Math.round(match.score)}%</div>
-        <form action={requestParticipantIntro.bind(null, eventSlug)}>
-          <input type="hidden" name="recipientId" value={match.participant.attendeeId} />
-          <button style={button}>Request intro</button>
-        </form>
+        <ActionForm action={requestParticipantIntro.bind(null, eventSlug)} hidden={{ recipientId: match.participant.attendeeId }}
+          label="Request intro" pendingLabel="Sending…" />
       </article>)}
     </div>}
   </main>;
@@ -51,4 +56,3 @@ const score = { color: "#f59e0b", fontWeight: 800, fontSize: 20 } as const;
 const muted = { color: "#a1a1aa", lineHeight: 1.5 } as const;
 const reason = { color: "#fbbf24", lineHeight: 1.5 } as const;
 const empty = { marginTop: 28, padding: 24, background: "#151519", borderRadius: 12 } as const;
-const button = { border: 0, borderRadius: 8, padding: "11px 15px", background: "#f59e0b", color: "#0a0a0e", fontWeight: 700, cursor: "pointer" } as const;

@@ -5,8 +5,17 @@ import { searchParticipants } from "../../src/application/use-cases/search-parti
 import { getMyMatches } from "../../src/application/use-cases/get-my-matches";
 import { getContainer } from "../../src/composition/container";
 import { getSession } from "../../lib/session";
+import { runFormAction, userMessage, type FormState } from "../../lib/form-state";
 
 export async function searchEventParticipants(eventSlug: string, searchText: string) {
+  try {
+    return { results: await searchEvent(eventSlug, searchText), error: null };
+  } catch (error) {
+    return { results: [], error: userMessage(error, "Search failed. Please try again.") };
+  }
+}
+
+async function searchEvent(eventSlug: string, searchText: string) {
   const session = await getSession();
   if (!session) throw new Error("Sign in to search this event");
   const container = getContainer();
@@ -50,7 +59,11 @@ export async function getParticipantMatches(eventSlug: string) {
   }));
 }
 
-export async function refreshParticipantMatches(eventSlug: string) {
+export async function refreshParticipantMatches(eventSlug: string, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, () => queueRefresh(eventSlug));
+}
+
+async function queueRefresh(eventSlug: string) {
   const session = await getSession();
   if (!session) throw new Error("Sign in to refresh your matches");
   const container = getContainer();
