@@ -39,9 +39,9 @@ async function importRoster(organizationSlug: string, eventSlug: string, formDat
   const container = getContainer();
   const event = await container.events.findBySlug(organizationSlug, eventSlug);
   if (!event) throw new Error("Event not found");
-  const records = parseRosterWorkbook(await file.arrayBuffer());
+  const { records, skipped } = parseRosterWorkbook(await file.arrayBuffer());
   const result = await importEventRoster({ eventId: event.id, organizerId: session.attendeeId, records }, container.events);
-  redirect(`/orgs/${organizationSlug}/events/${eventSlug}/roster?imported=${result.attached}`);
+  redirect(`/orgs/${organizationSlug}/events/${eventSlug}/roster?imported=${result.attached}&skipped=${skipped}`);
 }
 
 export async function updateEventAction(organizationSlug: string, eventSlug: string, _state: FormState, formData: FormData): Promise<FormState> {

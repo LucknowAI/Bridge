@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { attendees } from "@match-maker/db";
 import type { RosterAttendeeInput } from "../application/ports/event-repository";
-import { LIMITS } from "../domain/shared/validation";
+import { LIMITS, ValidationError } from "../domain/shared/validation";
 
 const COLUMN_NAMES = {
   name: ["name", "full name"],
@@ -15,13 +15,26 @@ const COLUMN_NAMES = {
   most_impressive_build: ["what most impressive thing you have built with ai", "most impressive build", "impressive build", "built with ai", "most_impressive_build"],
 } as const;
 
-export function parseRosterWorkbook(bytes: ArrayBuffer): RosterAttendeeInput[] {
-  const workbook = XLSX.read(Buffer.from(bytes), { type: "buffer" });
+export interface RosterParseResult {
+  records: RosterAttendeeInput[];
+  /** Rows left out: missing/invalid e-mail, or an e-mail/phone already seen in the file. */
+  skipped: number;
+}
+
+export function parseRosterWorkbook(bytes: ArrayBuffer): RosterParseResult {
+  let workbook: XLSX.WorkBook;
+  try {
+    workbook = XLSX.read(Buffer.from(bytes), { type: "buffer" });
+  } catch {
+    throw new ValidationError("file", "This file could not be read. Upload an .xlsx or .xls workbook.");
+  }
   const firstSheet = workbook.SheetNames[0];
-  if (!firstSheet) throw new Error("The workbook has no sheets");
+  if (!firstSheet) throw new ValidationError("file", "The workbook has no sheets");
   const sheet = workbook.Sheets[firstSheet];
   const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-  if (rawRows.length > LIMITS.rosterRows) throw new Error("Roster files are limited to 10,000 rows");
+  if (rawRows.length > LIMITS.rosterRows) {
+    throw new ValidationError("file", `Roster files are limited to ${LIMITS.rosterRows.toLocaleString("en")} rows`);
+  }
 
   const seenEmails = new Set<string>();
   const seenPhones = new Set<string>();
@@ -29,10 +42,9 @@ export function parseRosterWorkbook(bytes: ArrayBuffer): RosterAttendeeInput[] {
   for (const raw of rawRows) {
     const row = Object.fromEntries(Object.entries(raw).map(([key, value]) => [normalizeHeader(key), value]));
     const email = pick(row, COLUMN_NAMES.email)?.toLowerCase();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || seenEmails.has(email)) continue;
     const rawPhone = pick(row, COLUMN_NAMES.phone);
     const phone = rawPhone ? attendees.normalizePhone(rawPhone) : null;
-    if (phone && seenPhones.has(phone)) continue;
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || seenEmails.has(email) || (phone && seenPhones.has(phone))) continue;
     const rawYears = pick(row, COLUMN_NAMES.years_of_experience);
     const years = rawYears ? Number.parseInt(rawYears, 10) : NaN;
     result.push({
@@ -49,7 +61,8 @@ export function parseRosterWorkbook(bytes: ArrayBuffer): RosterAttendeeInput[] {
     seenEmails.add(email);
     if (phone) seenPhones.add(phone);
   }
-  return result;
+  if (!result.length) throw new ValidationError("file", "No rows with a valid e-mail address were found. Check the e-mail column.");
+  return { records: result, skipped: rawRows.length - result.length };
 }
 
 function normalizeHeader(value: string): string {

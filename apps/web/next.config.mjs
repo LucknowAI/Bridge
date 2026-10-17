@@ -27,6 +27,13 @@ const nextConfig = {
 
   poweredByHeader: false,
 
+  // Server actions accept 1 MB by default, which rejected rosters long before
+  // the 10 MB roster limit (LIMITS.rosterBytes). Allow the file plus
+  // multipart overhead; the action itself enforces the exact limit.
+  experimental: {
+    serverActions: { bodySizeLimit: "11mb" },
+  },
+
   async headers() {
     return [
       {
