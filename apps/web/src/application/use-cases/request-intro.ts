@@ -1,6 +1,7 @@
 import type { IntroRepository } from "../ports/intro-repository";
 import type { ParticipantRepository } from "../ports/participant-repository";
 import type { NotificationPort } from "../ports/notification";
+import { boundedText, LIMITS } from "../../domain/shared/validation";
 
 export async function requestIntro(
   input: { eventId: string; requesterId: string; recipientId: string; message?: string | null; eventName?: string },
@@ -13,7 +14,8 @@ export async function requestIntro(
     dependencies.participants.findProfile(input.eventId, input.recipientId),
   ]);
   if (!requester || !recipient || !recipient.visible || !recipient.profileComplete) throw new Error("This participant is unavailable");
-  const intro = await dependencies.intros.create(input);
+  const message = boundedText(input.message, "message", "Message", LIMITS.introMessage);
+  const intro = await dependencies.intros.create({ ...input, message });
   if (recipient.email && dependencies.notifications) {
     await dependencies.notifications.introRequested({
       recipientEmail: recipient.email,

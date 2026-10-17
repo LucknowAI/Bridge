@@ -1,5 +1,6 @@
 import { MatchingPipeline } from "../../domain/matching/pipeline";
 import type { RateLimiter } from "../ports/rate-limiter";
+import { boundedText, LIMITS } from "../../domain/shared/validation";
 
 export async function searchParticipants(
   input: { eventId: string; participantId: string; query: string; limit?: number },
@@ -8,5 +9,6 @@ export async function searchParticipants(
   if (dependencies.limiter && !(await dependencies.limiter.consume(`search:${input.participantId}`, 30, 60))) {
     throw new Error("Too many searches. Wait a moment and try again.");
   }
-  return dependencies.pipeline.run({ ...input, mode: "search" });
+  const query = boundedText(input.query, "query", "Search", LIMITS.searchQuery, { required: true })!;
+  return dependencies.pipeline.run({ ...input, query, mode: "search" });
 }

@@ -1,15 +1,17 @@
 import type { EventRepository, RosterAttendeeInput } from "../ports/event-repository";
 import { slugify } from "../../domain/shared/value-objects";
+import { Intent } from "../../domain/participant/intent";
+import { boundedItems, boundedText, LIMITS, ValidationError } from "../../domain/shared/validation";
 
 export async function createEvent(input: { organizationSlug: string; organizerId: string; name: string; slug?: string; description?: string }, events: EventRepository) {
   const organization = await events.findOrganization(input.organizationSlug);
   if (!organization) throw new Error("Organization not found");
   if (!(await events.hasOrganizationAccess(input.organizationSlug, input.organizerId))) throw new Error("You are not an organizer for this organization");
-  const name = input.name.trim();
-  if (name.length < 2 || name.length > 120) throw new Error("Event name must be between 2 and 120 characters");
-  const slug = slugify(input.slug || name);
-  if (!slug) throw new Error("Enter a valid event name or slug");
-  return events.create({ organizationId: organization.id, organizerId: input.organizerId, name, slug, description: input.description?.trim() || null });
+  const name = eventName(input.name)!;
+  const slug = slugify(boundedText(input.slug, "slug", "URL slug", LIMITS.eventSlug) || name).slice(0, LIMITS.eventSlug);
+  if (!slug) throw new ValidationError("slug", "Use letters or numbers in the event name or URL slug");
+  const description = boundedText(input.description, "description", "Description", LIMITS.eventDescription);
+  return events.create({ organizationId: organization.id, organizerId: input.organizerId, name, slug, description });
 }
 
 export async function updateEvent(input: {
@@ -22,7 +24,15 @@ export async function updateEvent(input: {
   zones?: string[];
 }, events: EventRepository) {
   if (!(await events.isOrganizer(input.eventId, input.organizerId))) throw new Error("You are not an organizer for this event");
-  const updated = await events.update(input);
+  const updated = await events.update({
+    ...input,
+    name: input.name === undefined ? undefined : eventName(input.name)!,
+    description: input.description === undefined ? undefined
+      : boundedText(input.description, "description", "Description", LIMITS.eventDescription),
+    intents: input.intents === undefined ? undefined : eventIntents(input.intents),
+    zones: input.zones === undefined ? undefined
+      : boundedItems(input.zones, "zones", "venue zones", { count: LIMITS.zoneCount, length: LIMITS.zoneLength }),
+  });
   if (!updated) throw new Error("Event not found");
   return updated;
 }
@@ -38,4 +48,17 @@ export async function queueEventMatches(input: { eventId: string; organizerId: s
   const participants = await events.participantIds(input.eventId);
   for (const participantId of participants) await enqueue(input.eventId, participantId);
   return participants.length;
+}
+
+function eventName(value: string) {
+  return boundedText(value, "name", "Event name", LIMITS.eventName, { required: true, min: LIMITS.eventNameMin });
+}
+
+function eventIntents(values: string[]) {
+  const intents = boundedItems(values.map((value) => value.toUpperCase()), "intents", "intents",
+    { count: Object.keys(Intent).length, length: 40 });
+  if (!intents.length || intents.some((intent) => !Object.values(Intent).includes(intent as Intent))) {
+    throw new ValidationError("intents", `Use supported intents separated by commas: ${Object.values(Intent).join(", ")}`);
+  }
+  return intents;
 }

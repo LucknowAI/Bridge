@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { createEvent, importEventRoster, queueEventMatches, updateEvent } from "../../src/application/use-cases/manage-event";
 import { getContainer } from "../../src/composition/container";
-import { Intent } from "../../src/domain/participant/intent";
+import { LIMITS } from "../../src/domain/shared/validation";
 import { parseRosterWorkbook } from "../../src/lib/excel-importer";
 import { getSession } from "../../lib/session";
 
@@ -26,7 +26,7 @@ export async function importEventRosterAction(organizationSlug: string, eventSlu
   if (!session) throw new Error("Sign in as an organizer first");
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size) throw new Error("Choose an Excel roster file");
-  if (file.size > 10 * 1024 * 1024) throw new Error("Roster files are limited to 10 MB");
+  if (file.size > LIMITS.rosterBytes) throw new Error("Roster files are limited to 10 MB");
   const container = getContainer();
   const event = await container.events.findBySlug(organizationSlug, eventSlug);
   if (!event) throw new Error("Event not found");
@@ -43,16 +43,12 @@ export async function updateEventAction(organizationSlug: string, eventSlug: str
   if (!event) throw new Error("Event not found");
   const status = String(formData.get("status") || event.status);
   if (!["draft", "open", "closed"].includes(status)) throw new Error("Choose a valid event status");
-  const intents = String(formData.get("intents") || "NETWORKING").split(",").map((item) => item.trim().toUpperCase()).filter(Boolean);
-  const zones = String(formData.get("zones") || "").split(",").map((item) => item.trim()).filter(Boolean);
-  if (!intents.length || intents.some((intent) => !Object.values(Intent).includes(intent as Intent))) {
-    throw new Error("Use supported intent names separated by commas");
-  }
-  if (zones.some((zone) => zone.length > 80)) throw new Error("Venue zone names must be 80 characters or fewer");
+  const intents = String(formData.get("intents") ?? "").split(",");
+  const zones = String(formData.get("zones") ?? "").split(",");
   await updateEvent({
     eventId: event.id,
     organizerId: session.attendeeId,
-    name: String(formData.get("name") || event.name),
+    name: String(formData.get("name") ?? ""),
     description: String(formData.get("description") || ""),
     status: status as "draft" | "open" | "closed",
     intents,

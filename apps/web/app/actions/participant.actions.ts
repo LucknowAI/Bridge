@@ -3,6 +3,7 @@
 import { upsertParticipant } from "../../src/application/use-cases/upsert-participant";
 import { getContainer } from "../../src/composition/container";
 import { Intent } from "../../src/domain/participant/intent";
+import { ValidationError } from "../../src/domain/shared/validation";
 import { getSession } from "../../lib/session";
 import { clearSession } from "../../lib/session";
 import { redirect } from "next/navigation";
@@ -19,15 +20,15 @@ export async function saveParticipantProfile(eventSlug: string, formData: FormDa
 
   const intentValue = String(formData.get("intent") || Intent.NETWORKING);
   if (!event.intents.includes(intentValue) || !Object.values(Intent).includes(intentValue as Intent)) {
-    throw new Error("Choose an intent configured for this event");
+    throw new ValidationError("intent", "Choose an intent configured for this event");
   }
   const venueZone = nullable(formData.get("venueZone"));
-  if (venueZone && !event.zones.includes(venueZone)) throw new Error("Choose a venue zone configured for this event");
+  if (venueZone && !event.zones.includes(venueZone)) throw new ValidationError("venueZone", "Choose a venue zone configured for this event");
   const profile = await upsertParticipant({
     eventId: event.id,
     attendeeId: session.attendeeId,
     intent: intentValue as Intent,
-    interests: String(formData.get("interests") || "").split(",").map((value) => value.trim()).filter(Boolean),
+    interests: String(formData.get("interests") || "").split(","),
     venueZone,
     aboutMe: nullable(formData.get("aboutMe")),
     designation: nullable(formData.get("designation")),
@@ -53,6 +54,6 @@ function parseYears(value: FormDataEntryValue | null): number | null {
   const text = String(value ?? "").trim();
   if (!text) return null;
   const years = Number(text);
-  if (!Number.isInteger(years)) throw new Error("Years of experience must be a whole number");
+  if (!Number.isInteger(years)) throw new ValidationError("yearsOfExperience", "Years of experience must be a whole number");
   return years;
 }

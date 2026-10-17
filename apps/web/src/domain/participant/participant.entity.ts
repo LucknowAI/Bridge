@@ -1,4 +1,5 @@
 import { Intent } from "./intent";
+import { boundedItems, boundedText, LIMITS, ValidationError } from "../shared/validation";
 
 export interface ParticipantProfile {
   eventId: string;
@@ -51,25 +52,21 @@ export function profileText(profile: ParticipantProfile): string {
 }
 
 export function validateProfile(input: ParticipantProfileInput): ParticipantProfileInput {
-  if (!input.eventId || !input.attendeeId) throw new Error("Participant and event are required");
-  if (!Object.values(Intent).includes(input.intent)) throw new Error("Choose a valid networking intent");
-  if (!Array.isArray(input.interests)) throw new Error("Interests must be a list");
-  if (input.yearsOfExperience != null && (!Number.isInteger(input.yearsOfExperience) || input.yearsOfExperience < 0 || input.yearsOfExperience > 80)) {
-    throw new Error("Years of experience must be between 0 and 80");
+  if (!input.eventId || !input.attendeeId) throw new ValidationError(null, "Participant and event are required");
+  if (!Object.values(Intent).includes(input.intent)) throw new ValidationError("intent", "Choose a valid networking intent");
+  if (!Array.isArray(input.interests)) throw new ValidationError("interests", "Interests must be a list");
+  const years = input.yearsOfExperience;
+  if (years != null && (!Number.isInteger(years) || years < 0 || years > LIMITS.yearsOfExperience)) {
+    throw new ValidationError("yearsOfExperience", `Years of experience must be a whole number from 0 to ${LIMITS.yearsOfExperience}`);
   }
   return {
     ...input,
-    designation: clean(input.designation),
-    domain: clean(input.domain),
-    aboutMe: clean(input.aboutMe),
-    selfDescription: clean(input.selfDescription),
-    mostImpressiveBuild: clean(input.mostImpressiveBuild),
-    venueZone: clean(input.venueZone),
-    interests: [...new Set(input.interests.map((interest) => interest.trim()).filter(Boolean))].slice(0, 20),
+    designation: boundedText(input.designation, "designation", "Role or designation", LIMITS.designation, { required: true }),
+    domain: boundedText(input.domain, "domain", "Professional domain", LIMITS.domain, { required: true }),
+    aboutMe: boundedText(input.aboutMe, "aboutMe", "About you", LIMITS.aboutMe, { required: true }),
+    selfDescription: boundedText(input.selfDescription, "selfDescription", "Current focus", LIMITS.selfDescription),
+    mostImpressiveBuild: boundedText(input.mostImpressiveBuild, "mostImpressiveBuild", "Most impressive build", LIMITS.mostImpressiveBuild),
+    venueZone: boundedText(input.venueZone, "venueZone", "Venue zone", LIMITS.zoneLength),
+    interests: boundedItems(input.interests, "interests", "interests", { count: LIMITS.interestCount, length: LIMITS.interestLength }),
   };
-}
-
-function clean(value: string | null): string | null {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed.slice(0, 2000) : null;
 }

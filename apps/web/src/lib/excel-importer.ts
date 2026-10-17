@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { attendees } from "@match-maker/db";
 import type { RosterAttendeeInput } from "../application/ports/event-repository";
+import { LIMITS } from "../domain/shared/validation";
 
 const COLUMN_NAMES = {
   name: ["name", "full name"],
@@ -20,7 +21,7 @@ export function parseRosterWorkbook(bytes: ArrayBuffer): RosterAttendeeInput[] {
   if (!firstSheet) throw new Error("The workbook has no sheets");
   const sheet = workbook.Sheets[firstSheet];
   const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-  if (rawRows.length > 10_000) throw new Error("Roster files are limited to 10,000 rows");
+  if (rawRows.length > LIMITS.rosterRows) throw new Error("Roster files are limited to 10,000 rows");
 
   const seenEmails = new Set<string>();
   const seenPhones = new Set<string>();
