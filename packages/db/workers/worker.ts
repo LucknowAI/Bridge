@@ -1,3 +1,5 @@
+import "dotenv/config";
+import { assertEnv } from "../../../apps/web/src/lib/env";
 import { closePool } from "../src/client";
 import { processEmbedJob } from "./embed.worker";
 import { processMatchJob } from "./match.worker";
@@ -7,6 +9,7 @@ process.on("SIGINT", () => { stopping = true; });
 process.on("SIGTERM", () => { stopping = true; });
 
 async function main() {
+  assertEnv("worker");
   console.info("[worker] embedding and matching queue started");
   while (!stopping) {
     const embedded = await processEmbedJob();

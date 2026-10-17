@@ -24,9 +24,9 @@ The Next.js app, shared packages, migrations, and worker run from one npm worksp
 
 ## Run the local stack
 
-Requirements: Node.js 22+, npm, and Docker Compose.
+Requirements: Node.js 22 (see `.nvmrc`; CI and every image use 22), npm, and Docker Compose. All commands below work in PowerShell and in bash.
 
-1. Copy `.env.example` to `.env`.
+1. Copy `.env.example` to `.env` (PowerShell: `Copy-Item .env.example .env`).
 2. Set `SESSION_SECRET` to a random value of at least 32 characters. In PowerShell:
 
    ```powershell
@@ -60,13 +60,23 @@ npm run docker:down
 
 ## Local development without Docker
 
-Install workspace dependencies and start PostgreSQL/Keycloak separately, or use Compose for those services. `.env` is loaded by migration and import commands; Next.js loads `.env` itself.
+Run the app and worker on the host while Compose provides only PostgreSQL and Keycloak. Every host command reads the root `.env`: `next.config.mjs` loads it for the web app, and the migration, seed, import, and worker scripts load it themselves. Values already set in the environment take precedence.
 
-```bash
+```powershell
 npm install
+docker compose up -d postgres keycloak
 npm run db:migrate
 npm run db:seed
-npm run dev
+npm run dev       # web app on http://localhost:3000 (set PORT to change it)
+npm run worker    # embedding and matching queue, in a second terminal
+```
+
+The web app and worker validate their settings when they start. A missing or malformed value stops the process with a list of every problem, for example:
+
+```text
+Invalid web configuration:
+  - SESSION_SECRET is required but not set.
+  - KEYCLOAK_CLIENT_SECRET is required but not set.
 ```
 
 ## Organizer and roster setup
@@ -88,6 +98,7 @@ The first command imports the global attendee directory so the organizer account
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Run the Next.js app in development |
+| `npm run worker` | Run the embedding and matching queue worker on the host |
 | `npm run build` | Build workspace packages and the app |
 | `npm run typecheck` | Type-check all workspaces |
 | `npm run lint` | Run ESLint |

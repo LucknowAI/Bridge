@@ -1,7 +1,13 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { config as loadEnv } from "dotenv";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+// Next.js only reads .env files from apps/web, but the workspace keeps one .env
+// at the repository root. Values already in the environment (Docker, CI, ECS)
+// win; a missing file is ignored.
+loadEnv({ path: join(here, "../../.env"), quiet: true });
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
