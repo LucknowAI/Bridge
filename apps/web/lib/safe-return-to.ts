@@ -4,7 +4,7 @@ export function safeReturnTo(value: unknown): string {
     typeof value !== "string" ||
     !value.startsWith("/") ||
     value.startsWith("//") ||
-    /[\\\u0000-\u0020\u007f]/.test(value)
+    /[\\\u0000- \u007f]/.test(value)
   ) return "/";
 
   try {
@@ -15,4 +15,18 @@ export function safeReturnTo(value: unknown): string {
   } catch {
     return "/";
   }
+}
+
+/** Where a signed-in user goes; never back to /login, which would loop. */
+export function postLoginPath(value: unknown): string {
+  const destination = safeReturnTo(value);
+  return /^\/login(?:[/?#]|$)/.test(destination) ? "/" : destination;
+}
+
+/** Login URL for a failed attempt that keeps the user's intended destination. */
+export function loginErrorPath(error: string, returnTo?: unknown): string {
+  const params = new URLSearchParams({ error });
+  const destination = postLoginPath(returnTo);
+  if (destination !== "/") params.set("returnTo", destination);
+  return `/login?${params}`;
 }
