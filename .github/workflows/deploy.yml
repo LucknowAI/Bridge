@@ -178,6 +178,17 @@ jobs:
             --task-definition "$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" --query 'services[0].taskDefinition' --output text)" \
             --query 'taskDefinition' > taskdef.json
 
+          # Production login must send real e-mail: never ship the dev fallback,
+          # and require the Resend key (an empty value fails the app's startup check).
+          if jq -e '[.containerDefinitions[].environment[]? | select(.name == "EMAIL_DEV_FALLBACK" and .value == "true")] | length > 0' taskdef.json >/dev/null; then
+            echo "::error::EMAIL_DEV_FALLBACK=true is set on the web task; login codes would be logged instead of sent."
+            exit 1
+          fi
+          if ! jq -e '[.containerDefinitions[].secrets[]? | select(.name == "RESEND_API_KEY")] | length > 0' taskdef.json >/dev/null; then
+            echo "::error::The web task has no RESEND_API_KEY secret; login e-mail cannot be delivered."
+            exit 1
+          fi
+
           # Strip the server-managed fields that RegisterTaskDefinition rejects,
           # then point the container at the immutable tag.
           jq --arg IMAGE "$REGISTRY/match-maker-prod/web:$TAG" '

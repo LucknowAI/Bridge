@@ -27,7 +27,8 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f web",
-    "keycloak:wait": "tsx tools/wait-for-keycloak.ts"
+    "keycloak:wait": "tsx tools/wait-for-keycloak.ts",
+    "keycloak:sync": "tsx tools/sync-keycloak.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

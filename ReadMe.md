@@ -107,6 +107,7 @@ The first command imports the global attendee directory so the organizer account
 | `npm run db:seed` | Upsert demo roster, organization, event, and organizer |
 | `npm run db:import -- <file> [event-slug]` | Import attendee rows and optionally attach them to an event |
 | `npm run keycloak:wait` | Wait for the configured Keycloak realm to respond |
+| `npm run keycloak:sync` | Apply the client secret and Google credentials from `.env` to an existing realm |
 | `npm run docker:up` | Build images and start the local Compose stack |
 
 `DATABASE_URL` should point at `localhost` for commands run on the host. Compose sets the service hostname `postgres` inside containers.
@@ -124,6 +125,22 @@ See `.env.example` for the full list. The main settings are:
 | `GEMINI_API_KEY` | Enables Gemini profile embeddings and LLM reranking |
 | `DEFAULT_EVENT_SLUG` | Event used by the `/` redirect |
 | `SEED_ON_MIGRATE` | Seeds demo data in the local stack; leave false in production |
+
+## Activating real e-mail and Google sign-in
+
+Locally, login codes are printed to the web log (`EMAIL_DEV_FALLBACK=true`) and the Google option is hidden. To switch on the real services:
+
+1. **E-mail:** verify a sending domain in [Resend](https://resend.com), then set `RESEND_API_KEY` and `EMAIL_FROM` (for example `Mr. Bridge <login@your-domain>`). Set `EMAIL_DEV_FALLBACK=false` to prove delivery works.
+2. **Google:** create an OAuth web client in Google Cloud Console with the authorised redirect URI `http://localhost:8080/realms/match-maker/broker/google/endpoint` (use your Keycloak host in other environments). Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+3. Apply the credentials to the running realm and restart the web app:
+
+   ```powershell
+   npm run keycloak:sync
+   ```
+
+   Keycloak imports `realm-export.json` only on first boot, so editing `.env` alone does not update an existing realm.
+
+In AWS, put the same values in the app's Secrets Manager secret (see `terraform output`). The web app refuses to start without `RESEND_API_KEY`, and the deploy workflow rejects a web task that enables `EMAIL_DEV_FALLBACK` or lacks the Resend secret.
 
 ## Docker and deployment
 
