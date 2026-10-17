@@ -84,8 +84,8 @@ describe("same-origin check", () => {
   });
 
   it("blocks cross-site API mutations but not reads", async () => {
-    expect(middleware(post({ origin: "https://evil.example" })).status).toBe(403);
-    expect(middleware(post({ origin: "https://evil.example" }, "GET")).headers.get("x-middleware-next")).toBe("1");
+    expect((await middleware(post({ origin: "https://evil.example" }))).status).toBe(403);
+    expect((await middleware(post({ origin: "https://evil.example" }, "GET"))).headers.get("x-middleware-next")).toBe("1");
   });
 });
 

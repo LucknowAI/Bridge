@@ -1,23 +1,37 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { getSessionConfig, sessionCookieOptions, unsealSession } from "@match-maker/auth";
+import { postLoginPath } from "./lib/safe-return-to";
 
-const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME || "mb_session";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) {
     return SAFE_METHODS.has(request.method) || isSameOrigin(request)
       ? NextResponse.next()
       : NextResponse.json({ error: "Cross-site requests are not allowed" }, { status: 403 });
   }
+  return loginRedirect(request);
+}
 
-  // The login route can skip its form when a session cookie is present.
-  if (request.cookies.has(SESSION_COOKIE)) {
-    const url = request.nextUrl.clone();
-    url.pathname = `/e/${process.env.DEFAULT_EVENT_SLUG || "demo"}`;
-    url.search = "";
-    return NextResponse.redirect(url);
+/**
+ * A valid session skips the login form and continues to `returnTo`. An expired
+ * or tampered cookie is cleared so the form shows instead of bouncing the user
+ * away. An `?error=` stays on the form so the user can switch accounts.
+ */
+async function loginRedirect(request: NextRequest) {
+  const { cookieName } = getSessionConfig();
+  const raw = request.cookies.get(cookieName)?.value;
+  if (!raw) return NextResponse.next();
+
+  const { searchParams } = request.nextUrl;
+  const session = await unsealSession(raw);
+  if (session && !searchParams.has("error")) {
+    return NextResponse.redirect(new URL(postLoginPath(searchParams.get("returnTo")), request.url));
   }
-  return NextResponse.next();
+
+  const response = NextResponse.next();
+  if (!session) response.cookies.set(cookieName, "", sessionCookieOptions(0));
+  return response;
 }
 
 /**
@@ -44,4 +58,5 @@ function originOf(url: string | null): string | null {
   }
 }
 
-export const config = { matcher: ["/login", "/api/:path*"] };
+// Session cookies are decrypted with node:crypto, so this cannot run on Edge.
+export const config = { runtime: "nodejs", matcher: ["/login", "/api/:path*"] };
