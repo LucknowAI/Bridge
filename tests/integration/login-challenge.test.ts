@@ -14,6 +14,10 @@ const hasDatabase = Boolean(process.env.DATABASE_URL);
 const describeDb = hasDatabase ? describe : describe.skip;
 
 const EMAIL = "integration-test@example.com";
+const QUERY_EMAIL = "integration-query@example.com";
+
+// Shared by both suites below, so the pool closes once, after both finish.
+afterAll(() => closePool());
 
 describeDb("login challenge lifecycle", () => {
   let attendeeId: string;
@@ -32,7 +36,6 @@ describeDb("login challenge lifecycle", () => {
   afterAll(async () => {
     await query(`delete from login_challenges where email = $1`, [EMAIL]);
     await query(`delete from registered_attendees where email = $1`, [EMAIL]);
-    await closePool();
   });
 
   async function freshChallenge() {
@@ -139,15 +142,30 @@ describeDb("login challenge lifecycle", () => {
   });
 });
 
+// Owns its attendee: the suite above deletes EMAIL in its afterAll.
 describeDb("attendee queries", () => {
+  let attendeeId: string;
+
+  beforeAll(async () => {
+    await migrate();
+    await attendees.upsertMany([
+      { name: "Integration Query", email: QUERY_EMAIL, phone: "+919999900002" },
+    ]);
+    attendeeId = (await attendees.findByEmail(QUERY_EMAIL))!.id;
+  });
+
+  afterAll(async () => {
+    await query(`delete from registered_attendees where email = $1`, [QUERY_EMAIL]);
+  });
+
   it("excludes the requester from match candidates", async () => {
-    const attendee = await attendees.findByEmail(EMAIL);
-    const candidates = await attendees.listMatchCandidates(attendee!.id);
-    expect(candidates.find((c) => c.id === attendee!.id)).toBeUndefined();
+    const candidates = await attendees.listMatchCandidates(attendeeId);
+    expect(candidates.find((c) => c.id === attendeeId)).toBeUndefined();
   });
 
   it("never exposes contact details on candidates", async () => {
     const candidates = await attendees.listMatchCandidates(null);
+    expect(candidates.some((c) => c.id === attendeeId)).toBe(true);
     for (const candidate of candidates) {
       expect(candidate).not.toHaveProperty("email");
       expect(candidate).not.toHaveProperty("phone");
