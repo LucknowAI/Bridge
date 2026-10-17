@@ -67,6 +67,18 @@ export function checkEnv(role: EnvRole, env: Env = process.env): string[] {
     if (secret && secret.length < 32) {
       problems.push("SESSION_SECRET must be at least 32 characters.");
     }
+
+    // Login depends on e-mail, so a deploy that cannot send it must not boot.
+    if (!value("RESEND_API_KEY") && value("EMAIL_DEV_FALLBACK") !== "true") {
+      problems.push("RESEND_API_KEY is required to send login e-mail (EMAIL_DEV_FALLBACK=true logs codes instead, local only).");
+    }
+    const from = value("EMAIL_FROM");
+    if (value("RESEND_API_KEY") && !from) {
+      problems.push("EMAIL_FROM is required when RESEND_API_KEY is set, using a sender on a domain verified in Resend.");
+    }
+    if (from && !isSenderAddress(from)) {
+      problems.push(`EMAIL_FROM must be "address@domain" or "Name <address@domain>", got "${from}".`);
+    }
   }
 
   if (value("EMBEDDING_PROVIDER") === "local" && !value("LOCAL_BGE_URL")) {
@@ -89,6 +101,11 @@ export function assertEnv(role: EnvRole, env: Env = process.env): void {
       problems.map((problem) => `  - ${problem}`).join("\n") +
       "\nSee .env.example for every setting."
   );
+}
+
+function isSenderAddress(raw: string): boolean {
+  const address = raw.match(/^[^<>]*<([^<>]+)>$/)?.[1] ?? raw;
+  return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address.trim());
 }
 
 function isHttpUrl(raw: string): boolean {

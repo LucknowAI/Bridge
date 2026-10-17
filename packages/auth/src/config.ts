@@ -55,6 +55,15 @@ export function getAuthConfig(): AuthConfig {
   };
 }
 
+/**
+ * Google sign-in is offered only when the Google client is configured; the
+ * same GOOGLE_CLIENT_ID feeds Keycloak's identity provider.
+ */
+export function isGoogleSignInEnabled(): boolean {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  return Boolean(clientId && clientId !== "not-configured");
+}
+
 export interface SessionConfig {
   secret: string;
   cookieName: string;
