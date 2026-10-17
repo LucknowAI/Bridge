@@ -36,7 +36,8 @@ describeDb("persisted match order", () => {
     );
     eventId = event.id;
     for (const id of Object.values(ids)) {
-      await query(`insert into event_participants (event_id, attendee_id) values ($1, $2) on conflict do nothing`, [eventId, id]);
+      await query(`insert into event_participants (event_id, attendee_id, profile_updated_at) values ($1, $2, now())
+         on conflict (event_id, attendee_id) do update set profile_updated_at = now()`, [eventId, id]);
     }
   });
 

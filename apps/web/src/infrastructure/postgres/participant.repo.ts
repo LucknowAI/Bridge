@@ -34,6 +34,12 @@ const PROFILE_COLUMNS = `p.event_id, a.id as attendee_id, a.name,
   p.venue_zone, p.visible, p.embedding::text as embedding, p.profile_updated_at`;
 const PROFILE_FROM = `from event_participants p
   join registered_attendees a on a.id = p.attendee_id`;
+/**
+ * Who other participants may see as a candidate: on this event's roster (the
+ * join), visible, named, and with a saved event profile. Every results path —
+ * fresh retrieval, cached ids, saved matches — applies this same rule.
+ */
+export const ELIGIBLE_CANDIDATE = `p.visible = true and a.name is not null and p.profile_updated_at is not null`;
 
 export class PostgresParticipantRepository implements ParticipantRepository {
   async findProfile(eventId: string, attendeeId: string): Promise<ParticipantProfile | null> {
@@ -72,7 +78,7 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     const vector = toVector(input.embedding ?? null);
     const { rows } = await query<ProfileRow>(
       `select ${PROFILE_COLUMNS} ${PROFILE_FROM}
-        where p.event_id = $1 and ($2::uuid is null or a.id <> $2::uuid) and p.visible = true and a.name is not null
+        where p.event_id = $1 and ($2::uuid is null or a.id <> $2::uuid) and ${ELIGIBLE_CANDIDATE}
         order by case when $3::vector is not null and p.embedding is not null then 0 else 1 end,
                  p.embedding <=> $3::vector nulls last, a.name asc
         limit $4`,
@@ -85,7 +91,7 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     if (!ids.length) return [];
     const { rows } = await query<ProfileRow>(
       `select ${PROFILE_COLUMNS} ${PROFILE_FROM}
-        where p.event_id = $1 and a.id = any($2::uuid[]) and p.visible = true
+        where p.event_id = $1 and a.id = any($2::uuid[]) and ${ELIGIBLE_CANDIDATE}
         order by array_position($2::uuid[], a.id)`,
       [eventId, ids]
     );

@@ -9,7 +9,7 @@ import type { ParticipantProfile } from "@/src/domain/participant/participant.en
 const profile = (attendeeId: string, overrides: Partial<ParticipantProfile> = {}): ParticipantProfile => ({
   eventId: "event", attendeeId, name: attendeeId, designation: null, domain: null, aboutMe: null,
   selfDescription: null, yearsOfExperience: null, mostImpressiveBuild: null,
-  intent: Intent.NETWORKING, interests: [], venueZone: null, visible: true, embedding: null, ...overrides,
+  intent: Intent.NETWORKING, interests: [], venueZone: null, visible: true, profileComplete: true, embedding: null, ...overrides,
 });
 
 // "strong" outscores "weak" on domain and shared interests, so score order is strong → weak.

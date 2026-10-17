@@ -3,6 +3,7 @@ import type { MatchRepository } from "../../application/ports/match-repository";
 import type { MatchCandidate } from "../../domain/matching/match-strategy";
 import type { ParticipantProfile } from "../../domain/participant/participant.entity";
 import { Intent } from "../../domain/participant/intent";
+import { ELIGIBLE_CANDIDATE } from "./participant.repo";
 
 interface MatchRow {
   event_id: string;
@@ -61,7 +62,7 @@ export class PostgresMatchRepository implements MatchRepository {
          from event_matches m
          join event_participants p on p.event_id = m.event_id and p.attendee_id = m.candidate_id
          join registered_attendees a on a.id = p.attendee_id
-        where m.event_id = $1 and m.participant_id = $2
+        where m.event_id = $1 and m.participant_id = $2 and ${ELIGIBLE_CANDIDATE}
         order by m.rank, m.candidate_id limit $3`,
       [eventId, participantId, Math.max(1, Math.min(100, limit))]
     );
