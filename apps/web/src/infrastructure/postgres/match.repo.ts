@@ -25,18 +25,25 @@ interface MatchRow {
 };
 
 export class PostgresMatchRepository implements MatchRepository {
-  async save(eventId: string, participantId: string, candidates: MatchCandidate[]): Promise<void> {
+  async save(eventId: string, participantId: string, candidates: MatchCandidate[], computationVersion: string): Promise<void> {
     await transaction(async (client) => {
       await client.query(`delete from event_matches where event_id = $1 and participant_id = $2`, [eventId, participantId]);
-      for (const candidate of candidates) {
-        await client.query(
-          `insert into event_matches
-            (event_id, participant_id, candidate_id, score, score_breakdown, match_reason, mutual_interest)
-           values ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
-          [eventId, participantId, candidate.participant.attendeeId, candidate.score,
-            JSON.stringify(candidate.scoreBreakdown), candidate.reason, candidate.mutualInterest]
-        );
-      }
+      if (candidates.length === 0) return;
+      // Array position is the final (possibly reranked) order, stored as rank 1..N.
+      await client.query(
+        `insert into event_matches
+          (event_id, participant_id, candidate_id, rank, score, score_breakdown, match_reason, mutual_interest, computation_version)
+         select $1, $2, c.candidate_id, c.rank, c.score, c.score_breakdown, c.match_reason, c.mutual_interest, $3
+           from unnest($4::uuid[], $5::int[], $6::numeric[], $7::jsonb[], $8::text[], $9::boolean[])
+             as c(candidate_id, rank, score, score_breakdown, match_reason, mutual_interest)`,
+        [eventId, participantId, computationVersion,
+          candidates.map((candidate) => candidate.participant.attendeeId),
+          candidates.map((_, index) => index + 1),
+          candidates.map((candidate) => candidate.score),
+          candidates.map((candidate) => JSON.stringify(candidate.scoreBreakdown)),
+          candidates.map((candidate) => candidate.reason),
+          candidates.map((candidate) => candidate.mutualInterest)]
+      );
     });
   }
 
@@ -55,7 +62,7 @@ export class PostgresMatchRepository implements MatchRepository {
          join event_participants p on p.event_id = m.event_id and p.attendee_id = m.candidate_id
          join registered_attendees a on a.id = p.attendee_id
         where m.event_id = $1 and m.participant_id = $2
-        order by m.score desc, m.created_at desc limit $3`,
+        order by m.rank, m.candidate_id limit $3`,
       [eventId, participantId, Math.max(1, Math.min(100, limit))]
     );
     return rows.map((row) => ({
