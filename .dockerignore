@@ -1,0 +1,25 @@
+.git
+.github
+node_modules
+**/node_modules
+**/.next
+**/dist
+.next
+
+# env files must never bake into an image — ECS injects them at runtime
+.env
+.env.*
+!.env.example
+
+# PII — never goes into an image
+*.xlsx
+
+docs
+infra/terraform/.terraform
+infra/terraform/*.tfstate*
+**/*.log
+**/.DS_Store
+.gemini-cache.json
+README.md
+ReadMe.md
+LICENSE

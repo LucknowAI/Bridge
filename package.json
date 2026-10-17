@@ -1,25 +1,42 @@
 {
-  "name": "mr-bridge",
-  "version": "0.1.0",
+  "name": "match-maker",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+  "packageManager": "npm@11.16.0",
+  "engines": {
+    "node": ">=20"
   },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.104.0",
-    "dotenv": "^17.4.2",
-    "next": "^15.3.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "xlsx": "^0.18.5"
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "tsx packages/db/src/migrate.ts",
+    "db:seed": "tsx packages/db/src/seed.ts",
+    "db:import": "tsx tools/import-attendees.ts",
+    "org:init": "tsx tools/bootstrap-organization.ts",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f web",
+    "keycloak:wait": "tsx tools/wait-for-keycloak.ts"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
-    "eslint": "^9",
-    "eslint-config-next": "15.3.1"
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

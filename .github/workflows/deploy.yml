@@ -1,0 +1,270 @@
+name: Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_keycloak:
+        description: "Also rebuild and roll out Keycloak"
+        type: boolean
+        default: false
+
+# Never let two deploys race for the same service.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  # Required to fetch the OIDC token that assumes the AWS deploy role.
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'match-maker-prod-cluster' }}
+  ECS_WEB_SERVICE: ${{ vars.ECS_WEB_SERVICE || 'match-maker-prod-web' }}
+  ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE || 'match-maker-prod-worker' }}
+  ECS_KEYCLOAK_SERVICE: ${{ vars.ECS_KEYCLOAK_SERVICE || 'match-maker-prod-keycloak' }}
+  MIGRATE_TASK_FAMILY: ${{ vars.MIGRATE_TASK_FAMILY || 'match-maker-prod-migrate' }}
+
+jobs:
+  # Re-run the fast checks against the exact commit being shipped, so a green
+  # PR that raced with another merge cannot deploy a broken main.
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run tests/unit
+
+  build-and-push:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    needs: [verify]
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive image tag
+        id: meta
+        # The commit SHA is the tag. `latest` also moves, but every deploy is
+        # pinned to an immutable tag so a rollback is just a re-deploy of one.
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/web:${{ steps.meta.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push migrate
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/migrate.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/migrate:${{ steps.meta.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/migrate:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/worker.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/worker:${{ steps.meta.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push Keycloak
+        if: inputs.deploy_keycloak
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/keycloak.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/keycloak:${{ steps.meta.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/match-maker-prod/keycloak:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  migrate:
+    name: Run migrations
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Migrations run BEFORE the new tasks roll out, so they must be
+      # backwards-compatible with the version currently serving traffic.
+      - name: Run migration task and wait
+        run: |
+          set -euo pipefail
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --task-definition "$MIGRATE_TASK_FAMILY" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.TASK_SECURITY_GROUP_ID }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          REASON=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN" \
+            --query 'tasks[0].stoppedReason' --output text)
+
+          echo "Exit code: $EXIT_CODE ($REASON)"
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error::Migration failed — aborting deploy. Check /ecs/match-maker-prod/migrate."
+            exit 1
+          fi
+
+  deploy:
+    name: Roll out
+    runs-on: ubuntu-latest
+    needs: [build-and-push, migrate]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Pin web task definition to the new image
+        id: taskdef
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          aws ecs describe-task-definition \
+            --task-definition "$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" --query 'services[0].taskDefinition' --output text)" \
+            --query 'taskDefinition' > taskdef.json
+
+          # Strip the server-managed fields that RegisterTaskDefinition rejects,
+          # then point the container at the immutable tag.
+          jq --arg IMAGE "$REGISTRY/match-maker-prod/web:$TAG" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' taskdef.json > new-taskdef.json
+
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          echo "arn=$NEW_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered $NEW_ARN"
+
+      - name: Update web service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_WEB_SERVICE" \
+            --task-definition "${{ steps.taskdef.outputs.arn }}" \
+            --query 'service.deployments[0].id' --output text
+
+      - name: Pin worker task definition to the new image
+        id: worker-taskdef
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          aws ecs describe-task-definition \
+            --task-definition "$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WORKER_SERVICE" --query 'services[0].taskDefinition' --output text)" \
+            --query 'taskDefinition' > worker-taskdef.json
+
+          jq --arg IMAGE "$REGISTRY/match-maker-prod/worker:$TAG" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' worker-taskdef.json > new-worker-taskdef.json
+
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-worker-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$NEW_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered $NEW_ARN"
+
+      - name: Update worker service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_WORKER_SERVICE" \
+            --task-definition "${{ steps.worker-taskdef.outputs.arn }}" \
+            --query 'service.deployments[0].id' --output text
+
+      - name: Force Keycloak rollout
+        if: inputs.deploy_keycloak
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_KEYCLOAK_SERVICE" \
+            --force-new-deployment >/dev/null
+
+      # The service's deployment circuit breaker rolls back automatically on
+      # failure; this makes the workflow reflect that outcome.
+      - name: Wait for the service to stabilise
+        run: |
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" "$ECS_WORKER_SERVICE"
+          echo "Web and worker deployments are stable."
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          URL="${{ vars.APP_BASE_URL }}"
+          if [ -z "$URL" ]; then
+            echo "APP_BASE_URL variable not set — skipping smoke test."
+            exit 0
+          fi
+
+          echo "Checking $URL/api/health/ready"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS --max-time 15 "$URL/api/health/ready" | tee /tmp/ready.json; then
+              echo
+              exit 0
+            fi
+            echo "attempt $attempt failed; retrying in 10s"
+            sleep 10
+          done
+
+          echo "::error::Readiness check never passed after deploy."
+          exit 1

@@ -1,0 +1,84 @@
+import { query, transaction } from "@match-maker/db";
+import type { MatchRepository } from "../../application/ports/match-repository";
+import type { MatchCandidate } from "../../domain/matching/match-strategy";
+import type { ParticipantProfile } from "../../domain/participant/participant.entity";
+import { Intent } from "../../domain/participant/intent";
+
+interface MatchRow {
+  event_id: string;
+  attendee_id: string;
+  name: string | null;
+  designation: string | null;
+  domain: string | null;
+  about_me: string | null;
+  self_description: string | null;
+  years_of_experience: number | null;
+  most_impressive_build: string | null;
+  intent: string;
+  interests: string[] | null;
+  venue_zone: string | null;
+  visible: boolean;
+  score: number;
+  score_breakdown: Record<string, number>;
+  mutual_interest: boolean;
+  match_reason: string | null;
+};
+
+export class PostgresMatchRepository implements MatchRepository {
+  async save(eventId: string, participantId: string, candidates: MatchCandidate[]): Promise<void> {
+    await transaction(async (client) => {
+      await client.query(`delete from event_matches where event_id = $1 and participant_id = $2`, [eventId, participantId]);
+      for (const candidate of candidates) {
+        await client.query(
+          `insert into event_matches
+            (event_id, participant_id, candidate_id, score, score_breakdown, match_reason, mutual_interest)
+           values ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+          [eventId, participantId, candidate.participant.attendeeId, candidate.score,
+            JSON.stringify(candidate.scoreBreakdown), candidate.reason, candidate.mutualInterest]
+        );
+      }
+    });
+  }
+
+  async listForParticipant(eventId: string, participantId: string, limit = 50): Promise<MatchCandidate[]> {
+    const { rows } = await query<MatchRow>(
+      `select p.event_id, a.id as attendee_id, a.name,
+              coalesce(p.designation, a.designation) as designation,
+              coalesce(p.domain, a.domain) as domain,
+              coalesce(p.about_me, a.about_me) as about_me,
+              coalesce(p.self_description, a.self_description) as self_description,
+              coalesce(p.years_of_experience, a.years_of_experience) as years_of_experience,
+              coalesce(p.most_impressive_build, a.most_impressive_build) as most_impressive_build,
+              p.intent, p.interests, p.venue_zone, p.visible,
+              m.score, m.score_breakdown, m.mutual_interest, m.match_reason
+         from event_matches m
+         join event_participants p on p.event_id = m.event_id and p.attendee_id = m.candidate_id
+         join registered_attendees a on a.id = p.attendee_id
+        where m.event_id = $1 and m.participant_id = $2
+        order by m.score desc, m.created_at desc limit $3`,
+      [eventId, participantId, Math.max(1, Math.min(100, limit))]
+    );
+    return rows.map((row) => ({
+      participant: {
+        eventId: row.event_id,
+        attendeeId: row.attendee_id,
+        name: row.name ?? "Participant",
+        designation: row.designation,
+        domain: row.domain,
+        aboutMe: row.about_me,
+        selfDescription: row.self_description,
+        yearsOfExperience: row.years_of_experience == null ? null : Number(row.years_of_experience),
+        mostImpressiveBuild: row.most_impressive_build,
+        intent: Object.values(Intent).includes(row.intent as Intent) ? row.intent as Intent : Intent.NETWORKING,
+        interests: row.interests ?? [],
+        venueZone: row.venue_zone,
+        visible: row.visible,
+      },
+      score: Number(row.score),
+      scoreBreakdown: row.score_breakdown ?? {},
+      mutualInterest: row.mutual_interest,
+      reason: row.match_reason,
+    }));
+  }
+
+}

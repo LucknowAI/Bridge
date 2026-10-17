@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "plugins": [{ "name": "next" }],
+    "types": ["node"],
+    "incremental": true,
+    "paths": {
+      "@/*": ["./*"],
+      "@match-maker/db": ["../../packages/db/src/index.ts"],
+      "@match-maker/auth": ["../../packages/auth/src/index.ts"],
+      "@match-maker/email": ["../../packages/email/src/index.ts"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next"]
+}

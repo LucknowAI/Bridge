@@ -1,34 +1,126 @@
 # dependencies
-/node_modules
+node_modules
 /.pnp
 .pnp.js
 
 # next.js
-/.next/
-/out/
+.next/
+out/
+next-env.d.ts
 
 # production
 /build
+dist/
 
-# misc
-.DS_Store
-*.pem
+# turbo
+.turbo
 
-# debug
-npm-debug.log*
-
-# env files
-.env*.local
-
-# gemini file cache
-.gemini-cache.json
-
-# attendee data (PII — never commit)
-*.xlsx
+# typescript
+*.tsbuildinfo
 
 # vercel
 .vercel
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# test output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# ---------------------------------------------------------------------------
+# Secrets — never commit
+# ---------------------------------------------------------------------------
+
+# env files — .env.example is the only one committed
+.env
+.env.*
+!.env.example
+
+# keys and certificates
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+
+# downloaded cloud / OAuth credentials
+credentials.json
+client_secret*.json
+service-account*.json
+*.secret
+secrets/
+
+# Keycloak user exports contain password hashes (realm-export.json stays)
+keycloak/*-users-*.json
+
+# local compose overrides often carry real credentials
+docker-compose.override.yml
+compose.override.yml
+
+# terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+!infra/terraform/*.tfvars.example
+infra/terraform/*.tfplan
+infra/terraform/.terraform.lock.hcl
+infra/terraform/override.tf
+infra/terraform/*_override.tf
+.terraformrc
+terraform.rc
+crash.log
+crash.*.log
+
+# ---------------------------------------------------------------------------
+# Attendee data (PII) and database dumps — never commit
+# ---------------------------------------------------------------------------
+*.xlsx
+*.xls
+*.csv
+*.dump
+*.backup
+*.sql.gz
+backups/
+
+# gemini file cache
+.gemini-cache.json
+
+# ---------------------------------------------------------------------------
+# Logs, caches and temp files
+# ---------------------------------------------------------------------------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+.cache/
+*.pid
+*.seed
+*.tmp
+*.temp
+tmp/
+temp/
+
+# editors and IDEs
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
