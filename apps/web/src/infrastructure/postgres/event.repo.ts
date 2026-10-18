@@ -37,6 +37,21 @@ export class PostgresEventRepository implements EventRepository {
   participantIds(eventId: string) {
     return events.participantIds(eventId);
   }
+  invitationTargets(eventId: string, attendeeId: string | null, resendAfterMinutes: number) {
+    return events.invitationTargets(eventId, attendeeId, resendAfterMinutes);
+  }
+  recordInvitation(eventId: string, attendeeId: string, error: string | null) {
+    return events.recordInvitation(eventId, attendeeId, error);
+  }
+  markClaimed(eventId: string, attendeeId: string) {
+    return events.markClaimed(eventId, attendeeId);
+  }
+  setRevoked(eventId: string, attendeeId: string, revoked: boolean) {
+    return events.setRevoked(eventId, attendeeId, revoked);
+  }
+  rosterState(eventId: string, attendeeId: string) {
+    return events.rosterState(eventId, attendeeId);
+  }
 
   async importRoster(eventId: string, records: Parameters<EventRepository["importRoster"]>[1]) {
     let upserted = 0;
@@ -51,14 +66,20 @@ export class PostgresEventRepository implements EventRepository {
   async analytics(eventId: string) {
     const { rows } = await query<{
       roster: string;
+      invited: string;
+      claimed: string;
+      removed: string;
       profiles: string;
       matches: string;
       pending_intros: string;
       accepted_intros: string;
     }>(
       `select
-         (select count(*) from event_participants where event_id = $1) as roster,
-         (select count(*) from event_participants where event_id = $1 and profile_updated_at is not null) as profiles,
+         (select count(*) from event_participants where event_id = $1 and revoked_at is null) as roster,
+         (select count(*) from event_participants where event_id = $1 and revoked_at is null and invited_at is not null) as invited,
+         (select count(*) from event_participants where event_id = $1 and revoked_at is null and claimed_at is not null) as claimed,
+         (select count(*) from event_participants where event_id = $1 and revoked_at is not null) as removed,
+         (select count(*) from event_participants where event_id = $1 and revoked_at is null and profile_updated_at is not null) as profiles,
          (select count(*) from event_matches where event_id = $1) as matches,
          (select count(*) from intro_requests where event_id = $1 and status = 'pending') as pending_intros,
          (select count(*) from intro_requests where event_id = $1 and status = 'accepted') as accepted_intros`,
@@ -66,6 +87,9 @@ export class PostgresEventRepository implements EventRepository {
     );
     return {
       roster: Number(rows[0]?.roster ?? 0),
+      invited: Number(rows[0]?.invited ?? 0),
+      claimed: Number(rows[0]?.claimed ?? 0),
+      removed: Number(rows[0]?.removed ?? 0),
       profiles: Number(rows[0]?.profiles ?? 0),
       matches: Number(rows[0]?.matches ?? 0),
       pendingIntros: Number(rows[0]?.pending_intros ?? 0),

@@ -13,6 +13,7 @@ export async function requireParticipantEvent(eventSlug: string, returnPath?: st
   if (!event) notFound();
   const registered = await container.participants.hasEventAccess(event.id, session.attendeeId);
   if (!registered) notFound();
+  await container.events.markClaimed(event.id, session.attendeeId);
   if (action && !eventAllows(event.status, action)) redirect(`/e/${eventSlug}`);
   return { session, event, container };
 }

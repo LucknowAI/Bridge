@@ -38,5 +38,13 @@ export interface EventRepository {
   attachRoster(eventId: string, attendeeIds: string[]): Promise<number>;
   participantIds(eventId: string): Promise<string[]>;
   importRoster(eventId: string, records: RosterAttendeeInput[]): Promise<{ upserted: number; attached: number }>;
-  analytics(eventId: string): Promise<{ roster: number; profiles: number; matches: number; pendingIntros: number; acceptedIntros: number }>;
+  analytics(eventId: string): Promise<{
+    roster: number; invited: number; claimed: number; profiles: number; removed: number;
+    matches: number; pendingIntros: number; acceptedIntros: number;
+  }>;
+  invitationTargets(eventId: string, attendeeId: string | null, resendAfterMinutes: number): Promise<Array<{ attendee_id: string; email: string; name: string | null }>>;
+  recordInvitation(eventId: string, attendeeId: string, error: string | null): Promise<void>;
+  markClaimed(eventId: string, attendeeId: string): Promise<void>;
+  setRevoked(eventId: string, attendeeId: string, revoked: boolean): Promise<boolean>;
+  rosterState(eventId: string, attendeeId: string): Promise<"active" | "revoked" | null>;
 }

@@ -1,7 +1,11 @@
-import { sendNotificationEmail } from "@match-maker/email";
+import { renderInvitationEmail, sendNotificationEmail } from "@match-maker/email";
 import type { NotificationPort } from "../../application/ports/notification";
 
 export class RealtimeNotifier implements NotificationPort {
+  async invitation(input: { email: string; name: string | null; eventName: string; organizationName: string; eventUrl: string }): Promise<void> {
+    await sendNotificationEmail({ to: input.email, ...renderInvitationEmail(input) });
+  }
+
   async introRequested(input: { recipientEmail: string; recipientName: string; requesterName: string; eventName: string; introId: string }): Promise<void> {
     const subject = `${input.requesterName} would like to meet at ${input.eventName}`;
     const text = `Hi ${input.recipientName},\n\n${input.requesterName} requested an introduction at ${input.eventName}. Sign in to Mr. Bridge to respond.`;

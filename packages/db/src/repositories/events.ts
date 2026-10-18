@@ -113,7 +113,9 @@ export async function isOrganizer(eventId: string, attendeeId: string): Promise<
 
 export async function isParticipant(eventId: string, attendeeId: string): Promise<boolean> {
   const { rows } = await query<{ allowed: boolean }>(
-    `select exists(select 1 from event_participants where event_id = $1 and attendee_id = $2) as allowed`,
+    `select exists(
+       select 1 from event_participants where event_id = $1 and attendee_id = $2 and revoked_at is null
+     ) as allowed`,
     [eventId, attendeeId]
   );
   return rows[0]?.allowed ?? false;
@@ -131,7 +133,8 @@ export async function hasOrganizationAccess(organizationSlug: string, attendeeId
 
 export async function participantIds(eventId: string): Promise<string[]> {
   const { rows } = await query<{ attendee_id: string }>(
-    `select attendee_id from event_participants where event_id = $1 and profile_updated_at is not null`, [eventId]
+    `select attendee_id from event_participants
+      where event_id = $1 and profile_updated_at is not null and revoked_at is null`, [eventId]
   );
   return rows.map((row) => row.attendee_id);
 }
@@ -155,9 +158,76 @@ export async function roster(eventId: string): Promise<Array<Record<string, unkn
     `select a.id, a.name, a.email, a.phone,
             coalesce(p.designation, a.designation) as designation,
             coalesce(p.domain, a.domain) as domain,
-            p.intent, p.visible, p.profile_updated_at
+            p.intent, p.visible, p.profile_updated_at,
+            p.invited_at, p.invite_count, p.invite_error, p.claimed_at, p.revoked_at
        from event_participants p join registered_attendees a on a.id = p.attendee_id
       where p.event_id = $1 order by a.name nulls last`, [eventId]
   );
   return rows;
+}
+
+export interface InvitationTarget {
+  attendee_id: string;
+  email: string;
+  name: string | null;
+}
+
+/**
+ * Who an invitation e-mail should go to: one attendee (a resend), or everyone
+ * never invited. Never revoked or already-claimed attendees, and a resend only
+ * once `resendAfterMinutes` have passed since the last one.
+ */
+export async function invitationTargets(eventId: string, attendeeId: string | null, resendAfterMinutes: number): Promise<InvitationTarget[]> {
+  const { rows } = await query<InvitationTarget>(
+    `select a.id as attendee_id, a.email, a.name
+       from event_participants p join registered_attendees a on a.id = p.attendee_id
+      where p.event_id = $1 and p.revoked_at is null and p.claimed_at is null and a.email is not null
+        and ($2::uuid is null and p.invited_at is null
+             or a.id = $2::uuid and (p.invited_at is null or p.invited_at < now() - make_interval(mins => $3)))
+      order by a.name nulls last`,
+    [eventId, attendeeId, resendAfterMinutes]
+  );
+  return rows;
+}
+
+/** Records one delivery attempt; a failure keeps the last successful send time. */
+export async function recordInvitation(eventId: string, attendeeId: string, error: string | null): Promise<void> {
+  await query(
+    `update event_participants
+        set invited_at = case when $3::text is null then now() else invited_at end,
+            invite_count = invite_count + case when $3::text is null then 1 else 0 end,
+            invite_error = $3, updated_at = now()
+      where event_id = $1 and attendee_id = $2`,
+    [eventId, attendeeId, error]
+  );
+}
+
+/** The first signed-in visit to the event claims the invitation. */
+export async function markClaimed(eventId: string, attendeeId: string): Promise<void> {
+  await query(
+    `update event_participants set claimed_at = now()
+      where event_id = $1 and attendee_id = $2 and claimed_at is null and revoked_at is null`,
+    [eventId, attendeeId]
+  );
+}
+
+/** Removes or restores an attendee's access; returns false when they are not on the roster. */
+export async function setRevoked(eventId: string, attendeeId: string, revoked: boolean): Promise<boolean> {
+  const { rowCount } = await query(
+    `update event_participants
+        set revoked_at = case when $3 then coalesce(revoked_at, now()) else null end, updated_at = now()
+      where event_id = $1 and attendee_id = $2`,
+    [eventId, attendeeId, revoked]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** Whether an attendee is on the roster, and if so whether access was removed. */
+export async function rosterState(eventId: string, attendeeId: string): Promise<"active" | "revoked" | null> {
+  const { rows } = await query<{ revoked: boolean }>(
+    `select revoked_at is not null as revoked from event_participants where event_id = $1 and attendee_id = $2`,
+    [eventId, attendeeId]
+  );
+  if (!rows[0]) return null;
+  return rows[0].revoked ? "revoked" : "active";
 }

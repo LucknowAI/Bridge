@@ -39,7 +39,7 @@ const PROFILE_FROM = `from event_participants p
  * join), visible, named, and with a saved event profile. Every results path —
  * fresh retrieval, cached ids, saved matches — applies this same rule.
  */
-export const ELIGIBLE_CANDIDATE = `p.visible = true and a.name is not null and p.profile_updated_at is not null`;
+export const ELIGIBLE_CANDIDATE = `p.visible = true and a.name is not null and p.profile_updated_at is not null and p.revoked_at is null`;
 
 export class PostgresParticipantRepository implements ParticipantRepository {
   async findProfile(eventId: string, attendeeId: string): Promise<ParticipantProfile | null> {
@@ -118,7 +118,9 @@ export class PostgresParticipantRepository implements ParticipantRepository {
 
   async hasEventAccess(eventId: string, attendeeId: string): Promise<boolean> {
     const { rows } = await query<{ allowed: boolean }>(
-      `select exists(select 1 from event_participants where event_id = $1 and attendee_id = $2) as allowed`,
+      `select exists(
+         select 1 from event_participants where event_id = $1 and attendee_id = $2 and revoked_at is null
+       ) as allowed`,
       [eventId, attendeeId]
     );
     return rows[0]?.allowed ?? false;
