@@ -1,4 +1,5 @@
 import { query } from "@match-maker/db";
+import { lexicalTsQuery, type SearchFilters } from "../../domain/matching/search-query";
 import type { ParticipantRepository } from "../../application/ports/participant-repository";
 import { Intent } from "../../domain/participant/intent";
 import type { ParticipantProfile, ParticipantProfileInput } from "../../domain/participant/participant.entity";
@@ -40,6 +41,10 @@ const PROFILE_FROM = `from event_participants p
  * join), visible, named, and with a saved event profile. Every results path —
  * fresh retrieval, cached ids, saved matches — applies this same rule.
  */
+/** Profile text searched when no embeddings are available. */
+const SEARCH_DOCUMENT = `to_tsvector('simple', concat_ws(' ', a.name, p.designation, p.domain, p.about_me,
+  p.self_description, p.most_impressive_build, array_to_string(p.interests, ' ')))`;
+
 export const ELIGIBLE_CANDIDATE = `p.visible = true and a.name is not null and p.profile_updated_at is not null and p.revoked_at is null`;
 
 export class PostgresParticipantRepository implements ParticipantRepository {
@@ -74,18 +79,39 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     eventId: string;
     excludeAttendeeId: string | null;
     embedding?: number[] | null;
+    terms?: string[];
+    filters?: SearchFilters;
     limit?: number;
   }): Promise<ParticipantProfile[]> {
     const vector = toVector(input.embedding ?? null);
+    // Lexical retrieval only when there is no query vector to rank by.
+    const tsQuery = vector ? null : lexicalTsQuery(input.terms ?? []);
     const { rows } = await query<ProfileRow>(
       `select ${PROFILE_COLUMNS} ${PROFILE_FROM}
         where p.event_id = $1 and ($2::uuid is null or a.id <> $2::uuid) and ${ELIGIBLE_CANDIDATE}
+          and ($5::text is null or p.intent = $5)
+          and ($6::text is null or lower(p.domain) = lower($6))
+          and ($7::text is null or ${SEARCH_DOCUMENT} @@ to_tsquery('simple', $7))
         order by case when $3::vector is not null and p.embedding is not null then 0 else 1 end,
-                 p.embedding <=> $3::vector nulls last, a.name asc
+                 p.embedding <=> $3::vector nulls last,
+                 case when $7::text is null then 0 else ts_rank(${SEARCH_DOCUMENT}, to_tsquery('simple', $7)) end desc,
+                 a.name asc
         limit $4`,
-      [input.eventId, input.excludeAttendeeId, vector, Math.max(1, Math.min(100, input.limit ?? 50))]
+      [input.eventId, input.excludeAttendeeId, vector, Math.max(1, Math.min(100, input.limit ?? 50)),
+        input.filters?.intent ?? null, input.filters?.domain ?? null, tsQuery]
     );
     return rows.map(mapProfile);
+  }
+
+  async listDomains(eventId: string): Promise<string[]> {
+    const { rows } = await query<{ domain: string }>(
+      // One entry per domain ignoring case, preferring a capitalised spelling.
+      `select (array_agg(trim(p.domain) order by trim(p.domain) = lower(trim(p.domain)), trim(p.domain)))[1] as domain ${PROFILE_FROM}
+        where p.event_id = $1 and ${ELIGIBLE_CANDIDATE} and coalesce(trim(p.domain), '') <> ''
+        group by lower(trim(p.domain)) order by 1`,
+      [eventId]
+    );
+    return rows.map((row) => row.domain.trim());
   }
 
   async findCandidatesByIds(eventId: string, ids: string[]): Promise<ParticipantProfile[]> {

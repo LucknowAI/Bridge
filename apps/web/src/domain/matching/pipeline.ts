@@ -3,7 +3,8 @@ import type { CandidateCache } from "../../application/ports/candidate-cache";
 import type { LlmProvider } from "../../application/ports/llm-provider";
 import type { MatchRepository } from "../../application/ports/match-repository";
 import type { ParticipantRepository } from "../../application/ports/participant-repository";
-import { profileText } from "../participant/participant.entity";
+import { profileText, type ParticipantProfile } from "../participant/participant.entity";
+import { NO_FILTERS, queryRelevance, queryTerms, searchScore, type SearchFilters } from "./search-query";
 import { ComplementarityScorer } from "./scorers/complementarity.scorer";
 import { DomainScorer } from "./scorers/domain.scorer";
 import { IntentScorer } from "./scorers/intent.scorer";
@@ -22,6 +23,7 @@ export interface MatchingInput {
   participantId: string;
   mode: "profile" | "search";
   query?: string;
+  filters?: SearchFilters;
   limit?: number;
 }
 
@@ -65,11 +67,10 @@ export class MatchingPipeline {
     // Hidden viewers may still browse; only a saved profile is required.
     if (!storedProfile?.profileComplete) throw new Error("Complete your event profile before continuing");
 
-    const embeddingText = input.mode === "search" ? input.query!.trim() : profileText(storedProfile);
-    const embedding = input.mode === "profile" && storedProfile.embedding
-      ? storedProfile.embedding
-      : await this.embeddings.embed(embeddingText, input.mode === "search" ? "query" : "profile");
-    if (input.mode === "profile" && embedding) {
+    if (input.mode === "search") return this.search(input, storedProfile);
+
+    const embedding = storedProfile.embedding ?? await this.embeddings.embed(profileText(storedProfile), "profile");
+    if (embedding && !storedProfile.embedding) {
       await this.participants.setEmbedding(input.eventId, input.participantId, embedding);
     }
     const viewer = { ...storedProfile, embedding: embedding ?? storedProfile.embedding };
@@ -78,7 +79,6 @@ export class MatchingPipeline {
       eventId: input.eventId,
       viewerId: input.participantId,
       embedding,
-      query: input.mode === "search" ? input.query : undefined,
       limit: 50,
     });
     const compatible = this.filter.execute(viewer, retrieved);
@@ -86,9 +86,39 @@ export class MatchingPipeline {
     const top = this.topK.execute(scored, input.limit ?? 12);
     const { candidates: ranked, rankedBy } = await this.rerank.execute(viewer, top);
 
-    if (input.mode === "profile") {
-      await this.persist.execute(input.eventId, input.participantId, ranked, `${MATCHING_PIPELINE_VERSION}+${rankedBy}`);
-    }
+    await this.persist.execute(input.eventId, input.participantId, ranked, `${MATCHING_PIPELINE_VERSION}+${rankedBy}`);
+    return ranked;
+  }
+
+  /**
+   * Search: the query embedding (or its words, without embeddings) retrieves
+   * and measures relevance; the searcher's own profile measures compatibility.
+   * Both feed the score, so the same query ranks differently per person.
+   */
+  private async search(input: MatchingInput, viewer: ParticipantProfile) {
+    const query = input.query!.trim();
+    const terms = queryTerms(query);
+    const queryEmbedding = await this.embeddings.embed(query, "query");
+    const retrieved = await this.retrieve.execute({
+      eventId: input.eventId,
+      viewerId: input.participantId,
+      embedding: queryEmbedding,
+      query,
+      terms,
+      filters: input.filters ?? NO_FILTERS,
+      limit: 50,
+    });
+    const compatible = this.filter.execute(viewer, retrieved);
+    const scored = this.score.execute(viewer, compatible).map((candidate) => {
+      const relevance = queryRelevance(terms, queryEmbedding, candidate.participant);
+      return {
+        ...candidate,
+        score: searchScore(relevance, candidate.score),
+        scoreBreakdown: { ...candidate.scoreBreakdown, query: relevance, profile: candidate.score / 100 },
+      };
+    }).sort((a, b) => b.score - a.score);
+    const top = this.topK.execute(scored, input.limit ?? 12);
+    const { candidates: ranked } = await this.rerank.execute(viewer, top);
     return ranked;
   }
 }
