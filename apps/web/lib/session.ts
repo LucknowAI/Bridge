@@ -81,8 +81,12 @@ export async function canReturnToPath(returnTo: string | null | undefined, atten
     return Boolean(event && await events.isParticipant(event.id, attendeeId));
   }
   // The event list and "new event" pages belong to the organization, not to an event.
-  const organizationRoute = returnTo.match(/^\/orgs\/([^/]+)\/events(?:\/new)?\/?$/);
-  if (organizationRoute) return events.hasOrganizationAccess(organizationRoute[1], attendeeId);
+  const organizationRoute = returnTo.match(/^\/orgs\/([^/]+)\/events(\/new)?\/?$/);
+  if (organizationRoute) {
+    if (await events.hasOrganizationAccess(organizationRoute[1], attendeeId)) return true;
+    // Organizers of one event may open the list (not the new-event page).
+    return !organizationRoute[2] && (await events.listForOrganization(organizationRoute[1], attendeeId)).length > 0;
+  }
   const organizerRoute = returnTo.match(/^\/orgs\/([^/]+)\/events\/([^/]+)(?:\/|$)/);
   if (organizerRoute) {
     const event = await events.findBySlug(organizerRoute[1], organizerRoute[2]);

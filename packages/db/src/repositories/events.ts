@@ -35,9 +35,35 @@ export async function findOrganization(slug: string): Promise<{ id: string; name
   return rows[0] ?? null;
 }
 
-export async function listForOrganization(orgSlug: string): Promise<EventRecord[]> {
-  const { rows } = await query<EventRecord>(`${EVENT_SELECT} where o.slug = $1 order by e.created_at desc`, [orgSlug]);
+/**
+ * The organization's events. With a viewer, only those they may open:
+ * everything for organization owners and admins, otherwise their own events.
+ */
+export async function listForOrganization(orgSlug: string, viewerId?: string): Promise<EventRecord[]> {
+  const { rows } = await query<EventRecord>(
+    `${EVENT_SELECT}
+      where o.slug = $1
+        and ($2::uuid is null
+             or exists (select 1 from organization_members m
+                         where m.organization_id = o.id and m.attendee_id = $2 and m.role in ('owner', 'admin'))
+             or exists (select 1 from event_organizers eo where eo.event_id = e.id and eo.attendee_id = $2))
+      order by e.created_at desc`,
+    [orgSlug, viewerId ?? null]
+  );
   return rows;
+}
+
+export type OrganizerRole = "owner" | "admin" | "organizer";
+
+/** The attendee's role on the event and in its organization (null when none). */
+export async function organizerRoles(eventId: string, attendeeId: string): Promise<{ event: OrganizerRole | null; organization: OrganizerRole | null }> {
+  const { rows } = await query<{ event_role: OrganizerRole | null; organization_role: OrganizerRole | null }>(
+    `select (select role from event_organizers where event_id = $1 and attendee_id = $2) as event_role,
+            (select m.role from organization_members m join events e on e.organization_id = m.organization_id
+              where e.id = $1 and m.attendee_id = $2) as organization_role`,
+    [eventId, attendeeId]
+  );
+  return { event: rows[0]?.event_role ?? null, organization: rows[0]?.organization_role ?? null };
 }
 
 export async function create(input: {
@@ -103,12 +129,10 @@ export async function statusOf(eventId: string): Promise<EventRecord["status"] |
   return rows[0]?.status ?? null;
 }
 
+/** Whether the attendee may open the event's organizer pages (any event role, or organization owner/admin). */
 export async function isOrganizer(eventId: string, attendeeId: string): Promise<boolean> {
-  const { rows } = await query<{ allowed: boolean }>(
-    `select exists(select 1 from event_organizers where event_id = $1 and attendee_id = $2) as allowed`,
-    [eventId, attendeeId]
-  );
-  return rows[0]?.allowed ?? false;
+  const roles = await organizerRoles(eventId, attendeeId);
+  return roles.event !== null || roles.organization === "owner" || roles.organization === "admin";
 }
 
 export async function isParticipant(eventId: string, attendeeId: string): Promise<boolean> {
@@ -230,4 +254,97 @@ export async function rosterState(eventId: string, attendeeId: string): Promise<
   );
   if (!rows[0]) return null;
   return rows[0].revoked ? "revoked" : "active";
+}
+
+export interface RosterRow {
+  name: string | null;
+  email: string;
+  phone: string | null;
+  about_me: string | null;
+  designation: string | null;
+  domain: string | null;
+  self_description: string | null;
+  years_of_experience: number | null;
+  most_impressive_build: string | null;
+}
+
+export interface RosterImportResult {
+  /** People not known before this import. */
+  created: number;
+  /** People newly added to this event (created or already known). */
+  attached: number;
+  /** People already on this event's roster. */
+  alreadyOnRoster: number;
+  /** Known people whose existing details differ from the sheet and were kept. */
+  keptExisting: number;
+  /** New people whose phone already belongs to someone else; imported without it. */
+  phoneConflicts: number;
+}
+
+const DETAIL_COLUMNS = ["name", "phone", "about_me", "designation", "domain", "self_description", "years_of_experience", "most_impressive_build"] as const;
+
+/**
+ * Imports a validated roster in one transaction, so a failure leaves nothing
+ * half-applied and retrying the same file is safe.
+ *
+ * People are identified by e-mail and shared across organizations, so an
+ * import never replaces anyone's existing name, phone or details: it only
+ * fills fields that are empty. A phone that already belongs to someone else
+ * is left off the new person instead of failing the whole import.
+ */
+export async function importRoster(eventId: string, rows: RosterRow[]): Promise<RosterImportResult> {
+  return transaction(async (client) => {
+    await client.query(`select pg_advisory_xact_lock(hashtext('roster-import:' || $1))`, [eventId]);
+    const result: RosterImportResult = { created: 0, attached: 0, alreadyOnRoster: 0, keptExisting: 0, phoneConflicts: 0 };
+    if (!rows.length) return result;
+
+    const emails = rows.map((row) => row.email);
+    const phones = rows.map((row) => row.phone).filter((phone): phone is string => Boolean(phone));
+    const { rows: known } = await client.query<RosterRow & { id: string }>(
+      `select id, ${DETAIL_COLUMNS.join(", ")}, email from registered_attendees
+        where email = any($1::text[]) or phone = any($2::text[])`,
+      [emails, phones]
+    );
+    const byEmail = new Map(known.filter((row) => row.email).map((row) => [row.email, row]));
+    const phoneOwner = new Map(known.filter((row) => row.phone).map((row) => [row.phone!, row.email]));
+
+    for (const row of rows) {
+      const existing = byEmail.get(row.email);
+      if (existing) {
+        if (DETAIL_COLUMNS.some((column) => row[column] != null && existing[column] != null && String(row[column]) !== String(existing[column]))) {
+          result.keptExisting += 1;
+        }
+        const freePhone = row.phone && !existing.phone && !phoneOwner.has(row.phone) ? row.phone : null;
+        await client.query(
+          `update registered_attendees set
+             ${DETAIL_COLUMNS.map((column, index) => `${column} = coalesce(${column}, $${index + 2})`).join(", ")},
+             updated_at = now()
+           where id = $1`,
+          [existing.id, ...DETAIL_COLUMNS.map((column) => column === "phone" ? freePhone : row[column])]
+        );
+        if (freePhone) phoneOwner.set(freePhone, row.email);
+        continue;
+      }
+      const phoneTaken = Boolean(row.phone && phoneOwner.has(row.phone));
+      if (phoneTaken) result.phoneConflicts += 1;
+      const columns = ["email", ...DETAIL_COLUMNS];
+      await client.query(
+        `insert into registered_attendees (${columns.join(", ")}) values (${columns.map((_, index) => `$${index + 1}`).join(", ")})`,
+        [row.email, ...DETAIL_COLUMNS.map((column) => column === "phone" && phoneTaken ? null : row[column])]
+      );
+      if (row.phone && !phoneTaken) phoneOwner.set(row.phone, row.email);
+      result.created += 1;
+    }
+
+    const { rows: attached } = await client.query<{ attached: boolean }>(
+      `insert into event_participants (event_id, attendee_id)
+       select $1, a.id from registered_attendees a where a.email = any($2::text[])
+       on conflict (event_id, attendee_id) do nothing
+       returning true as attached`,
+      [eventId, emails]
+    );
+    result.attached = attached.length;
+    result.alreadyOnRoster = new Set(emails).size - attached.length;
+    return result;
+  });
 }

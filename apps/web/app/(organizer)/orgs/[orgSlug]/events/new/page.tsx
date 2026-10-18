@@ -6,8 +6,8 @@ import { NewEventForm } from "@/components/organizer/EventForms";
 
 export default async function NewEventPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
-  const { organization, container } = await requireOrganizationMember(orgSlug, `/orgs/${orgSlug}/events/new`);
-  const existing = await container.events.listForOrganization(orgSlug);
+  const { session, organization, container } = await requireOrganizationMember(orgSlug, `/orgs/${orgSlug}/events/new`);
+  const existing = await container.events.listForOrganization(orgSlug, session.attendeeId);
   const create = createEventAction.bind(null, orgSlug);
   return <main style={shell}>
     <Link href={`/orgs/${orgSlug}/events/${existing[0]?.slug ?? "new"}`}>← Organizer</Link>

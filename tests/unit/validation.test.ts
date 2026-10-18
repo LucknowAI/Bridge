@@ -72,7 +72,7 @@ describe("event settings", () => {
   const events = {
     findOrganization: vi.fn(async () => ({ id: "org" })),
     hasOrganizationAccess: vi.fn(async () => true),
-    isOrganizer: vi.fn(async () => true),
+    organizerRoles: vi.fn(async () => ({ event: "owner", organization: null })),
     create: vi.fn(async (record) => record),
     update: vi.fn(async (record) => record),
   } as unknown as EventRepository;

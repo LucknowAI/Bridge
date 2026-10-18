@@ -10,7 +10,7 @@ export default async function EventDashboardPage({ params, searchParams }: {
 }) {
   const { orgSlug, eventSlug } = await params;
   const notice = await searchParams;
-  const { event, container } = await requireOrganizerEvent(orgSlug, eventSlug);
+  const { event, container, can } = await requireOrganizerEvent(orgSlug, eventSlug);
   const analytics = await container.events.analytics(event.id);
   const action = updateEventAction.bind(null, orgSlug, eventSlug);
   return <main style={shell}>
@@ -31,9 +31,11 @@ export default async function EventDashboardPage({ params, searchParams }: {
     </section>
     <h2>Event setup</h2>
     {notice.saved && <p role="status" className="notice">Event configuration saved.</p>}
-    <EventSetupForm action={action} event={{
+    {can("configure") ? <EventSetupForm action={action} event={{
       name: event.name, description: event.description ?? null, status: event.status, intents: event.intents, zones: event.zones,
-    }} />
+    }} /> : <p className="empty-state">
+      Registration is {event.status}. Only event owners and admins can change this event&apos;s settings.
+    </p>}
   </main>;
 }
 

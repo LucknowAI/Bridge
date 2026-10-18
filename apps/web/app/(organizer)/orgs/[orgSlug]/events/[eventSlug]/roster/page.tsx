@@ -20,11 +20,14 @@ const when = (value: Date | null) => value ? value.toLocaleString("en-IN", { dat
 
 export default async function RosterPage({ params, searchParams }: {
   params: Promise<{ orgSlug: string; eventSlug: string }>;
-  searchParams: Promise<{ imported?: string; skipped?: string; invited?: string; failed?: string; access?: string }>;
+  searchParams: Promise<{
+    imported?: string; skipped?: string; already?: string; kept?: string; phones?: string;
+    invited?: string; failed?: string; access?: string;
+  }>;
 }) {
   const { orgSlug, eventSlug } = await params;
   const query = await searchParams;
-  const { event, container } = await requireOrganizerEvent(orgSlug, eventSlug);
+  const { event, container, can } = await requireOrganizerEvent(orgSlug, eventSlug);
   const roster = (await container.events.roster(event.id)).map((person) => {
     const facts = {
       revokedAt: date(person.revoked_at), profileUpdatedAt: date(person.profile_updated_at), claimedAt: date(person.claimed_at),
@@ -41,7 +44,10 @@ export default async function RosterPage({ params, searchParams }: {
     <p>{roster.length} attendee{roster.length === 1 ? "" : "s"} on the roster for {event.name}.</p>
     {query.imported && <p role="status" className="notice">
       Added {query.imported} attendee(s) to this event.
+      {Number(query.already) > 0 && ` ${query.already} were already on the roster.`}
       {Number(query.skipped) > 0 && ` Skipped ${query.skipped} row(s) with a missing or invalid e-mail, or an e-mail/phone repeated in the file.`}
+      {Number(query.kept) > 0 && ` Kept the existing name, phone or details of ${query.kept} people already registered (they can update their own profile).`}
+      {Number(query.phones) > 0 && ` ${query.phones} new people were added without their phone, because it already belongs to someone else.`}
     </p>}
     {query.invited && <p role="status" className={Number(query.failed) > 0 ? "form-alert" : "notice"}>
       Sent {query.invited} invitation(s).{Number(query.failed) > 0 && ` ${query.failed} could not be delivered; see the roster for the reason.`}
@@ -49,11 +55,12 @@ export default async function RosterPage({ params, searchParams }: {
     {query.access && <p role="status" className="notice">
       {query.access === "removed" ? "Access removed. They are signed out of this event and no longer appear in anyone's results." : "Access restored."}
     </p>}
-    <RosterUploadForm action={action} />
+    {can("importRoster") ? <RosterUploadForm action={action} />
+      : <p className="empty-state">Only event owners and admins can import attendees or remove access.</p>}
     {roster.length > 0 && <section style={summary} aria-label="Invitation status">
       {(Object.keys(STATE_LABELS) as InvitationState[]).filter((state) => counts[state]).map((state) =>
         <span key={state}><strong>{counts[state]}</strong> {STATE_LABELS[state].toLowerCase()}</span>)}
-      {pending > 0 && <ActionForm action={sendInvitationsAction.bind(null, orgSlug, eventSlug, null)}
+      {pending > 0 && can("invite") && <ActionForm action={sendInvitationsAction.bind(null, orgSlug, eventSlug, null)}
         label={`Send invitations to ${pending} not yet invited`} pendingLabel="Sending invitations…" />}
     </section>}
     {!roster.length ? <p className="empty-state">No attendees yet. Import an Excel roster to invite people to this event.</p> :
@@ -71,9 +78,9 @@ export default async function RosterPage({ params, searchParams }: {
           <td>{String(person.designation ?? "—")}</td>
           <td>{STATE_LABELS[state]}{detail && <><br /><small style={{ color: "var(--muted)" }}>{detail}</small></>}</td>
           <td><div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {canInvite(facts) && state !== "not_invited" && <ActionForm action={sendInvitationsAction.bind(null, orgSlug, eventSlug, id)}
+            {can("invite") && canInvite(facts) && state !== "not_invited" && <ActionForm action={sendInvitationsAction.bind(null, orgSlug, eventSlug, id)}
               label="Resend" pendingLabel="Sending…" secondary />}
-            {state === "removed"
+            {!can("manageAccess") ? null : state === "removed"
               ? <ActionForm action={setAttendeeAccessAction.bind(null, orgSlug, eventSlug, id, false)} label="Restore" pendingLabel="Restoring…" secondary />
               : <ActionForm action={setAttendeeAccessAction.bind(null, orgSlug, eventSlug, id, true)} label="Remove access" pendingLabel="Removing…" secondary />}
           </div></td>
