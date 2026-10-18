@@ -27,7 +27,9 @@ export class LlmRerankStage {
 function addFallbackReason(candidate: MatchCandidate): MatchCandidate {
   if (candidate.reason) return candidate;
   const person = candidate.participant;
-  const sharedIntent = candidate.mutualInterest ? "Your networking goals align" : "Their background adds a complementary perspective";
+  const sharedIntent = candidate.mutualInterest
+    ? "You look like a strong fit for each other"
+    : "Their background adds a complementary perspective";
   const detail = person.domain ? ` in ${person.domain}` : "";
   return { ...candidate, reason: `${sharedIntent}${detail}.` };
 }

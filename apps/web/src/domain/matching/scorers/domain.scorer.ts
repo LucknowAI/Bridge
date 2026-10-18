@@ -1,9 +1,10 @@
+import { SCORING_CONFIG } from "../scoring-config";
 import type { ParticipantProfile } from "../../participant/participant.entity";
 import type { Scorer } from "./scorer";
 
 export class DomainScorer implements Scorer {
   readonly name = "domain";
-  readonly weight = 0.15;
+  readonly weight = SCORING_CONFIG.weights.domain;
   score(viewer: ParticipantProfile, candidate: ParticipantProfile): number {
     const a = viewer.domain?.trim().toLowerCase();
     const b = candidate.domain?.trim().toLowerCase();

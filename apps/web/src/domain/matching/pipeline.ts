@@ -8,7 +8,8 @@ import { NO_FILTERS, queryRelevance, queryTerms, searchScore, type SearchFilters
 import { ComplementarityScorer } from "./scorers/complementarity.scorer";
 import { DomainScorer } from "./scorers/domain.scorer";
 import { IntentScorer } from "./scorers/intent.scorer";
-import { JaccardScorer } from "./scorers/jaccard.scorer";
+import { InterestCoverageScorer } from "./scorers/jaccard.scorer";
+import { SCORING_CONFIG } from "./scoring-config";
 import { SemanticScorer } from "./scorers/semantic.scorer";
 import { SeniorityScorer } from "./scorers/seniority.scorer";
 import { IntentFilterStage } from "./stages/intent-filter.stage";
@@ -31,20 +32,25 @@ export interface MatchingInput {
  * Bump when scorers, weights, or stage behavior change, so persisted matches
  * from an older computation can be recognised and recomputed.
  */
-export const MATCHING_PIPELINE_VERSION = "v1";
+export const MATCHING_PIPELINE_VERSION = `v2.${SCORING_CONFIG.version}`;
+
+/** The scorers the pipeline combines, weighted by SCORING_CONFIG. */
+export function defaultScorers() {
+  return [
+    new SemanticScorer(),
+    new IntentScorer(),
+    new DomainScorer(),
+    new InterestCoverageScorer(),
+    new ComplementarityScorer(),
+    new SeniorityScorer(),
+  ];
+}
 
 /** Same retrieve/filter/score/top-K/rerank pipeline for both entry points. */
 export class MatchingPipeline {
   private readonly retrieve: RetrieveStage;
   private readonly filter = new IntentFilterStage();
-  private readonly score = new ScoreStage([
-    new SemanticScorer(),
-    new IntentScorer(),
-    new DomainScorer(),
-    new JaccardScorer(),
-    new ComplementarityScorer(),
-    new SeniorityScorer(),
-  ]);
+  private readonly score = new ScoreStage(defaultScorers());
   private readonly topK = new TopKStage();
   private readonly rerank: LlmRerankStage;
   private readonly persist: PersistStage;

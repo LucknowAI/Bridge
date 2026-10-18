@@ -1,9 +1,10 @@
+import { SCORING_CONFIG } from "../scoring-config";
 import type { ParticipantProfile } from "../../participant/participant.entity";
 import { cosineSimilarity, tokenize, type Scorer } from "./scorer";
 
 export class SemanticScorer implements Scorer {
   readonly name = "semantic";
-  readonly weight = 0.3;
+  readonly weight = SCORING_CONFIG.weights.semantic;
 
   score(viewer: ParticipantProfile, candidate: ParticipantProfile): number {
     const vectorScore = cosineSimilarity(viewer.embedding, candidate.embedding);
