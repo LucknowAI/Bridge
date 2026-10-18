@@ -62,6 +62,37 @@ export async function findIdsByEmails(emails: string[]): Promise<Array<{ id: str
   return rows;
 }
 
+/** Account-wide access flags, checked on every request (see migration 0007). */
+export async function accountState(id: string): Promise<{ disabled_at: Date | null; sessions_revoked_at: Date | null } | null> {
+  const { rows } = await query<{ disabled_at: Date | null; sessions_revoked_at: Date | null }>(
+    `select disabled_at, sessions_revoked_at from registered_attendees where id = $1`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
+/** Disables or re-enables an account; disabling also ends its sessions. Returns false when unknown. */
+export async function setDisabled(email: string, disabled: boolean): Promise<boolean> {
+  const { rowCount } = await query(
+    `update registered_attendees
+        set disabled_at = case when $2 then coalesce(disabled_at, now()) else null end,
+            sessions_revoked_at = case when $2 then now() else sessions_revoked_at end,
+            updated_at = now()
+      where email = $1`,
+    [normalizeEmail(email), disabled]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** Ends every session issued so far ("sign out everywhere"). Returns false when unknown. */
+export async function revokeSessions(email: string): Promise<boolean> {
+  const { rowCount } = await query(
+    `update registered_attendees set sessions_revoked_at = now(), updated_at = now() where email = $1`,
+    [normalizeEmail(email)]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 /** True when the e-mail is on the attendee roster — the gate for every login. */
 export async function isRegisteredEmail(email: string): Promise<boolean> {
   const { rows } = await query<{ exists: boolean }>(

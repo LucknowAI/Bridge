@@ -10,6 +10,8 @@ export interface Attendee {
   self_description: string | null;
   years_of_experience: number | null;
   most_impressive_build: string | null;
+  disabled_at: Date | null;
+  sessions_revoked_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }

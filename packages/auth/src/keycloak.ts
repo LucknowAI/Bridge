@@ -354,10 +354,50 @@ export async function ensureUser(
   return created.id;
 }
 
+// ── User status ──────────────────────────────────────────────────────────────
+// Sessions outlive a Keycloak disable or delete, so requests re-check the user.
+// The answer is cached briefly per replica; when Keycloak cannot be reached the
+// user is treated as enabled, and the database checks still apply.
+
+const USER_STATUS_TTL_MS = 5 * 60 * 1000;
+const userStatus = new Map<string, { enabled: boolean; until: number }>();
+
+export async function isUserEnabled(sub: string, now = Date.now()): Promise<boolean> {
+  const cached = userStatus.get(sub);
+  if (cached && cached.until > now) return cached.enabled;
+  let enabled: boolean;
+  try {
+    const res = await adminFetch(`/users/${encodeURIComponent(sub)}`);
+    if (res.status === 404) enabled = false;
+    else if (!res.ok) throw new Error(`Keycloak user lookup failed (${res.status})`);
+    else enabled = ((await res.json()) as { enabled?: boolean }).enabled !== false;
+  } catch (error) {
+    console.warn("[auth] could not check Keycloak user status; allowing:", (error as Error).message);
+    return true;
+  }
+  userStatus.set(sub, { enabled, until: now + USER_STATUS_TTL_MS });
+  return enabled;
+}
+
+/** Enables or disables a Keycloak user, ending their Keycloak sessions on disable. */
+export async function setUserEnabled(sub: string, enabled: boolean): Promise<void> {
+  const res = await adminFetch(`/users/${encodeURIComponent(sub)}`, { method: "PUT", body: JSON.stringify({ enabled }) });
+  if (!res.ok) throw new Error(`Keycloak user update failed (${res.status})`);
+  if (!enabled) await logoutUser(sub);
+  userStatus.delete(sub);
+}
+
+/** Ends the user's Keycloak (SSO) sessions, so Google sign-in asks again. */
+export async function logoutUser(sub: string): Promise<void> {
+  const res = await adminFetch(`/users/${encodeURIComponent(sub)}/logout`, { method: "POST" });
+  if (!res.ok && res.status !== 404) throw new Error(`Keycloak logout failed (${res.status})`);
+}
+
 /** Clear cached discovery/tokens. Exposed for tests. */
 export function resetCaches(): void {
   discoveryCache = null;
   adminToken = null;
+  userStatus.clear();
   jwks = null;
   jwksUri = null;
 }

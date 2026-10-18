@@ -30,6 +30,9 @@ export {
   buildLogoutUrl,
   ensureUser,
   findUserByEmail,
+  isUserEnabled,
+  setUserEnabled,
+  logoutUser,
   resetCaches,
   type Pkce,
   type TokenSet,
@@ -49,3 +52,4 @@ export {
   type VerifyResult,
   type VerifyFailure,
 } from "./otp";
+export { isSessionActive } from "./session-state";

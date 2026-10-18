@@ -4,9 +4,10 @@ import {
   sealSession,
   unsealSession,
   sessionCookieOptions,
+  isSessionActive,
   type Session,
 } from "@match-maker/auth";
-import { events } from "@match-maker/db";
+import { attendees, events } from "@match-maker/db";
 import { safeReturnTo } from "./safe-return-to";
 
 export type { Session };
@@ -15,7 +16,9 @@ export type { Session };
 export async function getSession(): Promise<Session | null> {
   const store = await cookies();
   const raw = store.get(getSessionConfig().cookieName)?.value;
-  return raw ? unsealSession(raw) : null;
+  const session = raw ? await unsealSession(raw) : null;
+  // A disabled account, revoked sessions, or a disabled Keycloak user end it now.
+  return session && (await isSessionActive(session)) ? session : null;
 }
 
 /** Issue a session cookie for a freshly authenticated user. */
@@ -53,6 +56,9 @@ export function clientIp(request: Request, hops = Number(process.env.TRUSTED_PRO
 
 /** Apply the event roster gate before issuing an event-specific login session. */
 export async function canReturnToPath(returnTo: string | null | undefined, attendeeId: string): Promise<boolean> {
+  // Every sign-in path checks this, so a disabled account cannot sign in at all.
+  const account = await attendees.accountState(attendeeId);
+  if (!account || account.disabled_at) return false;
   returnTo = safeReturnTo(returnTo);
   const participantRoute = returnTo.match(/^\/e\/([^/]+)(?:\/|$)/);
   if (participantRoute) {

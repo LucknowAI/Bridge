@@ -28,7 +28,10 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f web",
     "keycloak:wait": "tsx tools/wait-for-keycloak.ts",
-    "keycloak:sync": "tsx tools/sync-keycloak.ts"
+    "keycloak:sync": "tsx tools/sync-keycloak.ts",
+    "account:disable": "tsx tools/manage-account.ts disable",
+    "account:enable": "tsx tools/manage-account.ts enable",
+    "account:revoke-sessions": "tsx tools/manage-account.ts revoke-sessions"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

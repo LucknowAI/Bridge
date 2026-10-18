@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   findByEventSlug: vi.fn(), findBySlug: vi.fn(), isParticipant: vi.fn(), isOrganizer: vi.fn(), hasOrganizationAccess: vi.fn(),
 }));
-vi.mock("@match-maker/db", () => ({ events: mocks }));
+const accountState = vi.hoisted(() => vi.fn());
+vi.mock("@match-maker/db", () => ({ events: mocks, attendees: { accountState } }));
 
 import { canReturnToPath } from "@/lib/session";
 
@@ -11,6 +12,14 @@ describe("canReturnToPath", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findBySlug.mockResolvedValue(null);
+    accountState.mockResolvedValue({ disabled_at: null, sessions_revoked_at: null });
+  });
+
+  it("refuses a disabled account on every path", async () => {
+    accountState.mockResolvedValue({ disabled_at: new Date(), sessions_revoked_at: new Date() });
+    mocks.hasOrganizationAccess.mockResolvedValue(true);
+    await expect(canReturnToPath("/orgs/acme/events/new", "member")).resolves.toBe(false);
+    await expect(canReturnToPath("/", "member")).resolves.toBe(false);
   });
 
   it.each(["/orgs/acme/events/new", "/orgs/acme/events", "/orgs/acme/events/"])(
