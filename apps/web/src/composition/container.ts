@@ -4,6 +4,7 @@ import { PostgresMatchRepository } from "../infrastructure/postgres/match.repo";
 import { PostgresParticipantRepository } from "../infrastructure/postgres/participant.repo";
 import { PostgresRateLimiter } from "../infrastructure/cache/postgres-rate-limiter";
 import { PostgresEventRepository } from "../infrastructure/postgres/event.repo";
+import { PostgresMatchQueue } from "../infrastructure/postgres/match-queue.repo";
 import { PostgresCandidateCache } from "../infrastructure/cache/postgres-candidate-cache";
 import { UpstashCandidateCache } from "../infrastructure/cache/upstash-candidate-cache";
 import { RealtimeNotifier } from "../infrastructure/notifications/realtime.notifier";
@@ -28,6 +29,7 @@ function buildContainer() {
     embeddings,
     llm,
     candidateCache,
+    matchQueue: new PostgresMatchQueue(),
     notifications: new RealtimeNotifier(),
     limiter: new PostgresRateLimiter(),
     pipeline: new MatchingPipeline(participants, matches, embeddings, llm, candidateCache),
