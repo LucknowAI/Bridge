@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { updateEventAction } from "../../../../../actions/organizer.actions";
 import { requireOrganizerEvent } from "@/src/lib/auth";
 import { EventSetupForm } from "@/components/organizer/EventForms";
@@ -21,7 +22,7 @@ export default async function EventDashboardPage({ params, searchParams }: {
       <Link href={`/orgs/${orgSlug}/events/${eventSlug}/matching`}>Matching</Link>
       <Link href={`/orgs/${orgSlug}/events/${eventSlug}/analytics`}>Analytics</Link>
       <Link href={`/orgs/${orgSlug}/events/new`}>Create event</Link>
-    </nav>
+    <SignOutButton /></nav>
     <section style={stats}>
       <Stat label="Registered" value={analytics.roster} />
       <Stat label="Profiles" value={analytics.profiles} />

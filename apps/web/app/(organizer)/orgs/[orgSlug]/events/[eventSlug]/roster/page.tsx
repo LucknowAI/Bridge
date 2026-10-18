@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { importEventRosterAction } from "../../../../../../actions/organizer.actions";
 import { requireOrganizerEvent } from "@/src/lib/auth";
 import { RosterUploadForm } from "@/components/organizer/EventForms";
@@ -13,7 +14,7 @@ export default async function RosterPage({ params, searchParams }: {
   const roster = await container.events.roster(event.id);
   const action = importEventRosterAction.bind(null, orgSlug, eventSlug);
   return <main style={shell}>
-    <nav><Link href={`/orgs/${orgSlug}/events/${eventSlug}`}>← Dashboard</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/matching`}>Matching</Link></nav>
+    <nav><Link href={`/orgs/${orgSlug}/events/${eventSlug}`}>← Dashboard</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/matching`}>Matching</Link><SignOutButton /></nav>
     <h1>Attendee roster</h1>
     <p>{roster.length} registered attendee{roster.length === 1 ? "" : "s"} for {event.name}.</p>
     {query.imported && <p role="status" className="notice">

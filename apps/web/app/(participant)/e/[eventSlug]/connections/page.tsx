@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { getParticipantConnections, respondToParticipantIntro, shareVenueZoneAction } from "../../../../actions/intro.actions";
 import { requireParticipantEvent } from "@/src/lib/auth";
 import { ActionForm } from "@/components/ui/form";
@@ -13,7 +14,7 @@ export default async function ConnectionsPage({ params, searchParams }: {
   const { event } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/connections`, "viewMatches");
   const connections = await getParticipantConnections(eventSlug);
   return <main style={{ minHeight: "100vh", maxWidth: 900, margin: "0 auto", padding: "36px 24px", color: "#f4f4f5" }}>
-    <nav><Link href={`/e/${eventSlug}/matches`}>← Matches</Link><Link href={`/e/${eventSlug}/search`}>Search</Link><Link href={`/e/${eventSlug}/profile`}>Edit profile</Link></nav>
+    <nav><Link href={`/e/${eventSlug}/matches`}>← Matches</Link><Link href={`/e/${eventSlug}/search`}>Search</Link><Link href={`/e/${eventSlug}/profile`}>Edit profile</Link><SignOutButton /></nav>
     <span style={{ color: "#f59e0b", letterSpacing: 2, fontSize: 12 }}>INTRODUCTIONS · {event.name}</span>
     <h1>Connections</h1>
     {notice.requested && <p role="status" className="notice">Intro request sent. You will see their contact details once they accept.</p>}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { computeEventMatchesAction } from "../../../../../../actions/organizer.actions";
 import { requireOrganizerEvent } from "@/src/lib/auth";
 import { ActionForm } from "@/components/ui/form";
@@ -22,7 +23,7 @@ export default async function MatchingPage({ params, searchParams }: {
   ]);
   const action = computeEventMatchesAction.bind(null, orgSlug, eventSlug);
   return <main style={shell}>
-    <nav><Link href={`/orgs/${orgSlug}/events/${eventSlug}`}>← Dashboard</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/roster`}>Roster</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/analytics`}>Analytics</Link></nav>
+    <nav><Link href={`/orgs/${orgSlug}/events/${eventSlug}`}>← Dashboard</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/roster`}>Roster</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/analytics`}>Analytics</Link><SignOutButton /></nav>
     <h1>Matching pipeline</h1>
     <p>Embeddings and ranked matches run in the background for profiles already completed.</p>
     {query.queued && <p role="status" className="notice">Queued profile matching for {query.queued} attendee(s).</p>}

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { requireOrganizerEvent } from "@/src/lib/auth";
 
 export default async function AnalyticsPage({ params }: { params: Promise<{ orgSlug: string; eventSlug: string }> }) {
@@ -7,7 +8,7 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ orgS
   const analytics = await container.events.analytics(event.id);
   const completion = analytics.roster ? Math.round(analytics.profiles / analytics.roster * 100) : 0;
   return <main style={shell}>
-    <nav><Link href={`/orgs/${orgSlug}/events/${eventSlug}`}>← Dashboard</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/roster`}>Roster</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/matching`}>Matching</Link></nav>
+    <nav><Link href={`/orgs/${orgSlug}/events/${eventSlug}`}>← Dashboard</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/roster`}>Roster</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/matching`}>Matching</Link><SignOutButton /></nav>
     <h1>Event analytics</h1>
     <p>{event.name} · {event.status}</p>
     <section style={grid}>

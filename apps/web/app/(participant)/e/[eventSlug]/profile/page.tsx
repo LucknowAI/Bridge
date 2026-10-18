@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { notFound } from "next/navigation";
 import { saveParticipantProfile } from "../../../../actions/participant.actions";
 import { requireParticipantEvent } from "@/src/lib/auth";
@@ -13,7 +14,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ eventS
   const zones = event.zones ?? [];
 
   return <main style={shell}>
-    <nav><Link href={`/e/${eventSlug}`}>← {event.name}</Link><Link href={`/e/${eventSlug}/connections`}>Connections</Link></nav>
+    <nav><Link href={`/e/${eventSlug}`}>← {event.name}</Link><Link href={`/e/${eventSlug}/connections`}>Connections</Link><SignOutButton /></nav>
     <span style={eyebrow}>PARTICIPANT PROFILE</span>
     <h1>Make your next introduction count.</h1>
     <p>Confirm the profile other attendees will see, then set what you want from this event.</p>

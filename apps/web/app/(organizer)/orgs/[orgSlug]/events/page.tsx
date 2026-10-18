@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { requireOrganizationMember } from "@/src/lib/auth";
 
 export default async function OrganizationEventsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
@@ -7,6 +8,7 @@ export default async function OrganizationEventsPage({ params }: { params: Promi
   const events = await container.events.listForOrganization(orgSlug);
   return <main style={{ minHeight: "100vh", maxWidth: 900, margin: "0 auto", padding: "40px 24px", color: "#f4f4f5" }}>
     <span style={{ color: "#f59e0b", letterSpacing: 2, fontSize: 12 }}>ORGANIZER</span>
+    <nav><SignOutButton /></nav>
     <h1>{organization.name} events</h1>
     <Link href={`/orgs/${orgSlug}/events/new`} style={button}>Create event</Link>
     <div style={{ display: "grid", gap: 12, marginTop: 28 }}>

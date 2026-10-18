@@ -45,6 +45,7 @@ export default async function EventLandingPage({ params }: { params: Promise<{ e
         <Link style={button} href={`/e/${eventSlug}/connections`}>Connections</Link>
       </>
       : <p>This event has not opened yet. Come back when the organizer opens registration.</p>}
+    <form action={signOutCurrentUser} style={{ marginTop: 28 }}><button className="link-button" type="submit">Sign out</button></form>
   </main>;
 }
 
