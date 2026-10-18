@@ -3,6 +3,7 @@ import { slugify } from "../../domain/shared/value-objects";
 import { Intent } from "../../domain/participant/intent";
 import { boundedItems, boundedText, LIMITS, ValidationError } from "../../domain/shared/validation";
 import { assertOrganizerCan, type OrganizerAction } from "../../domain/shared/organizer-permissions";
+import { buildProfileForm, readProfileForm, type ProfileFieldKey, type ProfileFieldSetting } from "../../domain/participant/profile-form";
 
 /** Throws unless the attendee's role on the event allows the action. */
 export async function authorizeOrganizer(events: EventRepository, eventId: string, attendeeId: string, action: OrganizerAction): Promise<void> {
@@ -67,4 +68,16 @@ function eventIntents(values: string[]) {
     throw new ValidationError("intents", `Use supported intents separated by commas: ${Object.values(Intent).join(", ")}`);
   }
   return intents;
+}
+
+/** Saves the organizer's profile form settings as a new form version. */
+export async function configureProfileForm(
+  input: { eventId: string; organizerId: string; fields: Record<ProfileFieldKey, ProfileFieldSetting>; currentConfig: unknown },
+  events: EventRepository
+) {
+  await authorizeOrganizer(events, input.eventId, input.organizerId, "configure");
+  const form = buildProfileForm(input.fields, readProfileForm(input.currentConfig));
+  const updated = await events.update({ eventId: input.eventId, organizerId: input.organizerId, formConfig: { ...form } });
+  if (!updated) throw new Error("Event not found");
+  return form;
 }

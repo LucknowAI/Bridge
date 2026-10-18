@@ -21,6 +21,7 @@ interface ProfileRow {
   visible: boolean;
   embedding: string | number[] | null;
   profile_updated_at?: Date | null;
+  profile_form_version?: number;
 }
 
 const PROFILE_COLUMNS = `p.event_id, a.id as attendee_id, a.name,
@@ -31,7 +32,7 @@ const PROFILE_COLUMNS = `p.event_id, a.id as attendee_id, a.name,
   coalesce(p.years_of_experience, a.years_of_experience) as years_of_experience,
   coalesce(p.most_impressive_build, a.most_impressive_build) as most_impressive_build,
   p.intent, p.interests,
-  p.venue_zone, p.visible, p.embedding::text as embedding, p.profile_updated_at`;
+  p.venue_zone, p.visible, p.embedding::text as embedding, p.profile_updated_at, p.profile_form_version`;
 const PROFILE_FROM = `from event_participants p
   join registered_attendees a on a.id = p.attendee_id`;
 /**
@@ -57,11 +58,11 @@ export class PostgresParticipantRepository implements ParticipantRepository {
          intent = $3, interests = $4, venue_zone = $5,
          about_me = $6, designation = $7, domain = $8,
          self_description = $9, years_of_experience = $10,
-         most_impressive_build = $11, embedding = null, profile_updated_at = now(), updated_at = now()
+         most_impressive_build = $11, profile_form_version = $12, embedding = null, profile_updated_at = now(), updated_at = now()
        where event_id = $1 and attendee_id = $2`,
       [input.eventId, input.attendeeId, input.intent, input.interests, input.venueZone,
         input.aboutMe, input.designation, input.domain, input.selfDescription,
-        input.yearsOfExperience, input.mostImpressiveBuild]
+        input.yearsOfExperience, input.mostImpressiveBuild, input.formVersion ?? 0]
     );
     if (!rowCount) throw new Error("This attendee is not on the event roster");
     const saved = await this.findProfile(input.eventId, input.attendeeId);
@@ -148,6 +149,7 @@ function mapProfile(row: ProfileRow): ParticipantProfile {
     venueZone: row.venue_zone,
     visible: row.visible,
     profileComplete: Boolean(row.profile_updated_at),
+    formVersion: row.profile_form_version ?? 0,
     embedding: parseEmbedding(row.embedding),
   };
 }
