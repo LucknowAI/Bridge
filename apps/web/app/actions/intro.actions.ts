@@ -5,6 +5,7 @@ import { requestIntro } from "../../src/application/use-cases/request-intro";
 import { respondToIntro } from "../../src/application/use-cases/respond-to-intro";
 import { shareVenueZone } from "../../src/application/use-cases/share-venue-zone";
 import { getContainer } from "../../src/composition/container";
+import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { getSession } from "../../lib/session";
 import { runFormAction, type FormState } from "../../lib/form-state";
 
@@ -18,6 +19,7 @@ async function requestIntroFor(eventSlug: string, formData: FormData) {
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event) throw new Error("Event not found");
+  assertEventAllows(event.status, "requestIntro");
   const recipientId = String(formData.get("recipientId") || "");
   if (!recipientId) throw new Error("Choose a participant");
   await requestIntro({
@@ -40,6 +42,7 @@ async function respondToIntroFor(eventSlug: string, introId: string, accept: boo
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  assertEventAllows(event.status, "respondToIntro");
   await respondToIntro({ eventId: event.id, introId, actorId: session.attendeeId, accept, eventName: event.name }, container);
   redirect(`/e/${eventSlug}/connections`);
 }
@@ -54,6 +57,7 @@ async function shareZoneFor(eventSlug: string, introId: string, formData: FormDa
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  assertEventAllows(event.status, "shareZone");
   await shareVenueZone({
     eventId: event.id,
     introId,
@@ -70,6 +74,7 @@ export async function getParticipantConnections(eventSlug: string) {
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  assertEventAllows(event.status, "viewMatches");
   const requests = await container.intros.listForParticipant(event.id, session.attendeeId);
   const revealed = await container.intros.getRevealedContacts(event.id, session.attendeeId);
   const contacts = new Map(revealed.map(({ intro, contact }) => [intro.id, contact]));

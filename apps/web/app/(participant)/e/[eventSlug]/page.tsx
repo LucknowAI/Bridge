@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getContainer } from "@/src/composition/container";
 import { signOutCurrentUser } from "../../../actions/participant.actions";
+import { eventAllows } from "@/src/domain/shared/event-lifecycle";
 
 export default async function EventLandingPage({ params }: { params: Promise<{ eventSlug: string }> }) {
   const { eventSlug } = await params;
@@ -37,8 +38,13 @@ export default async function EventLandingPage({ params }: { params: Promise<{ e
   return <main style={shell}>
     <span style={eyebrow}>{event.status.toUpperCase()}</span>
     <h1>{event.name}</h1>
-    <p>This event is not accepting profiles right now.</p>
-    <Link style={button} href={`/e/${eventSlug}/matches`}>View your matches</Link>
+    {eventAllows(event.status, "viewMatches")
+      ? <>
+        <p>This event has closed. Your matches and accepted connections stay available, and you can still reply to pending introductions.</p>
+        <Link style={button} href={`/e/${eventSlug}/matches`}>View your matches</Link>{" "}
+        <Link style={button} href={`/e/${eventSlug}/connections`}>Connections</Link>
+      </>
+      : <p>This event has not opened yet. Come back when the organizer opens registration.</p>}
   </main>;
 }
 

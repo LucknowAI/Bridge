@@ -6,8 +6,7 @@ import ProfileForm from "@/components/participant/ProfileForm";
 
 export default async function ProfilePage({ params }: { params: Promise<{ eventSlug: string }> }) {
   const { eventSlug } = await params;
-  const { session, event, container } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/profile`);
-  if (event.status !== "open") notFound();
+  const { session, event, container } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/profile`, "saveProfile");
   const profile = await container.participants.findProfile(event.id, session.attendeeId);
   if (!profile) notFound();
   const intents = event.intents?.length ? event.intents : ["NETWORKING"];

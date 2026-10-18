@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { searchParticipants } from "../../src/application/use-cases/search-participants";
 import { getMyMatches } from "../../src/application/use-cases/get-my-matches";
 import { getContainer } from "../../src/composition/container";
+import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { getSession } from "../../lib/session";
 import { runFormAction, userMessage, type FormState } from "../../lib/form-state";
 
@@ -20,8 +21,8 @@ async function searchEvent(eventSlug: string, searchText: string) {
   if (!session) throw new Error("Sign in to search this event");
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
-  if (!event || event.status !== "open") throw new Error("This event is not open for matching");
-  if (!(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  assertEventAllows(event.status, "search");
   const results = await searchParticipants({ eventId: event.id, participantId: session.attendeeId, query: searchText }, container);
   return results.map((match) => ({
     id: match.participant.attendeeId,
@@ -43,6 +44,7 @@ export async function getParticipantMatches(eventSlug: string) {
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  assertEventAllows(event.status, "viewMatches");
   const results = await getMyMatches({ eventId: event.id, participantId: session.attendeeId }, container.matches);
   return results.map((match) => ({
     id: match.participant.attendeeId,
@@ -69,6 +71,7 @@ async function queueRefresh(eventSlug: string) {
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  assertEventAllows(event.status, "refreshMatches");
   await container.enqueueEmbedding(event.id, session.attendeeId);
   redirect(`/e/${eventSlug}/matches?queued=1`);
 }

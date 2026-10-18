@@ -9,7 +9,7 @@ export default async function ConnectionsPage({ params, searchParams }: {
 }) {
   const { eventSlug } = await params;
   const notice = await searchParams;
-  const { event } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/connections`);
+  const { event } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/connections`, "viewMatches");
   const connections = await getParticipantConnections(eventSlug);
   return <main style={{ minHeight: "100vh", maxWidth: 900, margin: "0 auto", padding: "36px 24px", color: "#f4f4f5" }}>
     <nav><Link href={`/e/${eventSlug}/matches`}>← Matches</Link><Link href={`/e/${eventSlug}/search`}>Search</Link><Link href={`/e/${eventSlug}/profile`}>Edit profile</Link></nav>

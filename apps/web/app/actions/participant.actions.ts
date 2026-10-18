@@ -2,6 +2,7 @@
 
 import { upsertParticipant } from "../../src/application/use-cases/upsert-participant";
 import { getContainer } from "../../src/composition/container";
+import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { Intent } from "../../src/domain/participant/intent";
 import { ValidationError } from "../../src/domain/shared/validation";
 import { clearSession, getSession } from "../../lib/session";
@@ -20,10 +21,10 @@ async function saveProfile(eventSlug: string, formData: FormData) {
   if (!session) throw new Error("Sign in before saving your profile");
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
-  if (!event || event.status !== "open") throw new Error("This event is not accepting profiles");
-  if (!(await container.participants.hasEventAccess(event.id, session.attendeeId))) {
+  if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) {
     throw new Error("You are not on this event's registration list");
   }
+  assertEventAllows(event.status, "saveProfile");
 
   const intentValue = String(formData.get("intent") || Intent.NETWORKING);
   if (!event.intents.includes(intentValue) || !Object.values(Intent).includes(intentValue as Intent)) {

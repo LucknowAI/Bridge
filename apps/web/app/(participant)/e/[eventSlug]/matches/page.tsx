@@ -12,7 +12,7 @@ export default async function MatchesPage({ params, searchParams }: {
 }) {
   const { eventSlug } = await params;
   const notice = await searchParams;
-  const { session, event, container } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/matches`);
+  const { session, event, container } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/matches`, "viewMatches");
   const viewer = await container.participants.findProfile(event.id, session.attendeeId);
   if (!viewer?.profileComplete) redirect(`/e/${eventSlug}/profile`);
   const matches = await getMyMatches({ eventId: event.id, participantId: session.attendeeId, limit: 12 }, container.matches);

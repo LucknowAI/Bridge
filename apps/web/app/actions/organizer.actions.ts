@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { createEvent, importEventRoster, queueEventMatches, updateEvent } from "../../src/application/use-cases/manage-event";
 import { getContainer } from "../../src/composition/container";
+import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { LIMITS, ValidationError } from "../../src/domain/shared/validation";
 import { runFormAction, type FormState } from "../../lib/form-state";
 import { parseRosterWorkbook } from "../../src/lib/excel-importer";
@@ -80,7 +81,8 @@ async function queueMatches(organizationSlug: string, eventSlug: string) {
   const container = getContainer();
   const event = await container.events.findBySlug(organizationSlug, eventSlug);
   if (!event) throw new Error("Event not found");
-  if (event.status !== "open") await updateEvent({ eventId: event.id, organizerId: session.attendeeId, status: "open" }, container.events);
+  assertEventAllows(event.status, "computeMatches");
+  if (event.status === "draft") await updateEvent({ eventId: event.id, organizerId: session.attendeeId, status: "open" }, container.events);
   const queued = await queueEventMatches({ eventId: event.id, organizerId: session.attendeeId }, container.events, container.enqueueEmbedding);
   redirect(`/orgs/${organizationSlug}/events/${eventSlug}/matching?queued=${queued}`);
 }

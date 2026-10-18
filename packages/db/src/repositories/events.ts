@@ -97,6 +97,12 @@ export async function update(input: {
   return findBySlug(old.organization_slug, old.slug);
 }
 
+/** The event's status, or null when the event no longer exists. */
+export async function statusOf(eventId: string): Promise<EventRecord["status"] | null> {
+  const { rows } = await query<{ status: EventRecord["status"] }>(`select status from events where id = $1`, [eventId]);
+  return rows[0]?.status ?? null;
+}
+
 export async function isOrganizer(eventId: string, attendeeId: string): Promise<boolean> {
   const { rows } = await query<{ allowed: boolean }>(
     `select exists(select 1 from event_organizers where event_id = $1 and attendee_id = $2) as allowed`,
