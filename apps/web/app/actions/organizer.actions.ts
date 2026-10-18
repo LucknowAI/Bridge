@@ -8,6 +8,7 @@ import { LIMITS, ValidationError } from "../../src/domain/shared/validation";
 import { runFormAction, type FormState } from "../../lib/form-state";
 import { parseRosterWorkbook } from "../../src/lib/excel-importer";
 import { getSession } from "../../lib/session";
+import { sendInvitations, setAttendeeAccess } from "../../src/application/use-cases/manage-invitations";
 
 export async function createEventAction(organizationSlug: string, _state: FormState, formData: FormData): Promise<FormState> {
   return runFormAction(formData, async () => {
@@ -85,4 +86,37 @@ async function queueMatches(organizationSlug: string, eventSlug: string) {
   if (event.status === "draft") await updateEvent({ eventId: event.id, organizerId: session.attendeeId, status: "open" }, container.events);
   const queued = await queueEventMatches({ eventId: event.id, organizerId: session.attendeeId }, container.events, container.enqueueEmbedding);
   redirect(`/orgs/${organizationSlug}/events/${eventSlug}/matching?queued=${queued}`);
+}
+
+/** Invites everyone never invited, or (with attendeeId) resends to one person. */
+export async function sendInvitationsAction(organizationSlug: string, eventSlug: string, attendeeId: string | null, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, async () => {
+    const session = await getSession();
+    if (!session) throw new Error("Sign in as an organizer first");
+    const container = getContainer();
+    const event = await container.events.findBySlug(organizationSlug, eventSlug);
+    if (!event) throw new Error("Event not found");
+    const base = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
+    const result = await sendInvitations({
+      eventId: event.id,
+      organizerId: session.attendeeId,
+      eventName: event.name,
+      organizationName: event.organization_name,
+      eventUrl: `${base}/e/${event.slug}`,
+      attendeeId: attendeeId ?? undefined,
+    }, container);
+    redirect(`/orgs/${organizationSlug}/events/${eventSlug}/roster?invited=${result.sent}&failed=${result.failed}`);
+  });
+}
+
+export async function setAttendeeAccessAction(organizationSlug: string, eventSlug: string, attendeeId: string, revoked: boolean, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, async () => {
+    const session = await getSession();
+    if (!session) throw new Error("Sign in as an organizer first");
+    const container = getContainer();
+    const event = await container.events.findBySlug(organizationSlug, eventSlug);
+    if (!event) throw new Error("Event not found");
+    await setAttendeeAccess({ eventId: event.id, organizerId: session.attendeeId, attendeeId, revoked }, container);
+    redirect(`/orgs/${organizationSlug}/events/${eventSlug}/roster?access=${revoked ? "removed" : "restored"}`);
+  });
 }

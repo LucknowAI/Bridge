@@ -35,6 +35,7 @@ function ports(targets: Array<{ attendee_id: string; email: string; name: string
     invitationTargets: vi.fn().mockResolvedValue(targets),
     recordInvitation: vi.fn().mockResolvedValue(undefined),
     setRevoked: vi.fn().mockResolvedValue(true),
+    isOrganizer: vi.fn().mockResolvedValue(true),
   };
   const notifications = {
     invitation: vi.fn(async ({ email }: { email: string }) => {
@@ -45,7 +46,7 @@ function ports(targets: Array<{ attendee_id: string; email: string; name: string
   return { events: events as any, notifications: notifications as any, raw: { events, notifications } };
 }
 
-const event = { eventId: "event", eventName: "Summit", organizationName: "Acme", eventUrl: "https://bridge.example.com/e/summit" };
+const event = { eventId: "event", organizerId: "organizer", eventName: "Summit", organizationName: "Acme", eventUrl: "https://bridge.example.com/e/summit" };
 
 describe("sendInvitations", () => {
   it("sends to every target and records successes and failures separately", async () => {
@@ -69,7 +70,17 @@ describe("setAttendeeAccess", () => {
   it("refuses someone not on the roster", async () => {
     const { events, raw } = ports([]);
     raw.events.setRevoked.mockResolvedValue(false);
-    await expect(setAttendeeAccess({ eventId: "event", attendeeId: "x", revoked: true }, { events })).rejects.toThrow(/not on the event roster/);
+    await expect(setAttendeeAccess({ eventId: "event", organizerId: "organizer", attendeeId: "x", revoked: true }, { events }))
+      .rejects.toThrow(/not on the event roster/);
+  });
+
+  it("refuses anyone who is not an organizer of the event", async () => {
+    const { events, notifications, raw } = ports([{ attendee_id: "a", email: "a@example.com", name: "A" }]);
+    raw.events.isOrganizer.mockResolvedValue(false);
+    await expect(setAttendeeAccess({ eventId: "event", organizerId: "x", attendeeId: "a", revoked: true }, { events })).rejects.toThrow(/not an organizer/);
+    await expect(sendInvitations({ ...event, organizerId: "x" }, { events, notifications })).rejects.toThrow(/not an organizer/);
+    expect(raw.events.setRevoked).not.toHaveBeenCalled();
+    expect(raw.notifications.invitation).not.toHaveBeenCalled();
   });
 });
 

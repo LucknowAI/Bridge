@@ -13,9 +13,10 @@ export interface InvitationResult {
  * up on the roster instead of disappearing.
  */
 export async function sendInvitations(
-  input: { eventId: string; eventName: string; organizationName: string; eventUrl: string; attendeeId?: string },
+  input: { eventId: string; organizerId: string; eventName: string; organizationName: string; eventUrl: string; attendeeId?: string },
   dependencies: { events: EventRepository; notifications: NotificationPort }
 ): Promise<InvitationResult> {
+  await assertOrganizer(input.eventId, input.organizerId, dependencies.events);
   const targets = await dependencies.events.invitationTargets(input.eventId, input.attendeeId ?? null, RESEND_AFTER_MINUTES);
   if (input.attendeeId && !targets.length) {
     throw new Error(`This attendee cannot be invited right now: they may have signed in already, been removed, or been invited in the last ${RESEND_AFTER_MINUTES} minutes.`);
@@ -47,10 +48,15 @@ export async function sendInvitations(
  * everyone's results; their history stays for the organizer.
  */
 export async function setAttendeeAccess(
-  input: { eventId: string; attendeeId: string; revoked: boolean },
+  input: { eventId: string; organizerId: string; attendeeId: string; revoked: boolean },
   dependencies: { events: EventRepository }
 ): Promise<void> {
+  await assertOrganizer(input.eventId, input.organizerId, dependencies.events);
   if (!(await dependencies.events.setRevoked(input.eventId, input.attendeeId, input.revoked))) {
     throw new Error("This attendee is not on the event roster");
   }
+}
+
+async function assertOrganizer(eventId: string, organizerId: string, events: EventRepository): Promise<void> {
+  if (!(await events.isOrganizer(eventId, organizerId))) throw new Error("You are not an organizer for this event");
 }

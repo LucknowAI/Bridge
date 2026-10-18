@@ -12,7 +12,8 @@ export async function requireParticipantEvent(eventSlug: string, returnPath?: st
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event) notFound();
   const registered = await container.participants.hasEventAccess(event.id, session.attendeeId);
-  if (!registered) notFound();
+  // The landing page explains why: removed by the organizer, or a different account.
+  if (!registered) redirect(`/e/${eventSlug}`);
   await container.events.markClaimed(event.id, session.attendeeId);
   if (action && !eventAllows(event.status, action)) redirect(`/e/${eventSlug}`);
   return { session, event, container };

@@ -12,7 +12,9 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ orgS
     <h1>Event analytics</h1>
     <p>{event.name} · {event.status}</p>
     <section style={grid}>
-      <Card label="Roster size" value={analytics.roster} />
+      <Card label="Roster size" value={analytics.roster} note={analytics.removed ? `${analytics.removed} removed` : undefined} />
+      <Card label="Invitations sent" value={analytics.invited} />
+      <Card label="Claimed accounts" value={analytics.claimed} />
       <Card label="Profile completion" value={`${completion}%`} note={`${analytics.profiles} profiles`} />
       <Card label="Persisted match rows" value={analytics.matches} />
       <Card label="Pending introductions" value={analytics.pendingIntros} />
