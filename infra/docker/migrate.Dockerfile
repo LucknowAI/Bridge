@@ -19,5 +19,9 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY packages/db  packages/db
 COPY tools        tools
 
+# Amazon's RDS CA bundle, so DATABASE_SSL=verify can check the database
+# certificate (DATABASE_CA_CERT_FILE points here in the task definitions).
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
+
 # Seeding is opt-in: it must run on a fresh local stack, never against prod data.
 CMD ["sh", "-c", "npx tsx packages/db/src/migrate.ts && if [ \"$SEED_ON_MIGRATE\" = \"true\" ]; then npx tsx packages/db/src/seed.ts; fi"]

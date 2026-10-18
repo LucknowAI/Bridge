@@ -23,6 +23,9 @@ FROM quay.io/keycloak/keycloak:26.0
 
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
 
+# Amazon's RDS CA bundle, referenced by KC_DB_URL (sslmode=verify-full).
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /opt/keycloak/conf/rds-global-bundle.pem
+
 # Imported on first boot. Placeholders inside are filled from the task's
 # environment (client secret, app URL, Google credentials).
 COPY keycloak/realm-export.json /opt/keycloak/data/import/realm-export.json

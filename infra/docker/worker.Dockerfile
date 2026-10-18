@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Runs the async profile embedding and matching queue processors.
 FROM node:22-alpine
 WORKDIR /repo
@@ -14,6 +15,10 @@ COPY apps/web/src apps/web/src
 COPY packages/db packages/db
 COPY packages/auth packages/auth
 COPY packages/email packages/email
+
+# Amazon's RDS CA bundle, so DATABASE_SSL=verify can check the database
+# certificate (DATABASE_CA_CERT_FILE points here in the task definitions).
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
 
 ENV NODE_ENV=production
 # Release tag (commit SHA), logged when the worker starts.

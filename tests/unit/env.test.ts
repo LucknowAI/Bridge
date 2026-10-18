@@ -47,7 +47,7 @@ describe("checkEnv", () => {
     expect(problems).toEqual([
       'APP_BASE_URL must be an http(s) URL, got "localhost:3000".',
       'DATABASE_POOL_MAX must be a positive integer, got "ten".',
-      'DATABASE_SSL must be one of disable, require, got "on".',
+      'DATABASE_SSL must be one of disable, require, verify, got "on".',
     ]);
   });
 

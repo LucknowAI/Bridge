@@ -56,6 +56,10 @@ COPY --from=builder --chown=node:node /repo/apps/web/.next/standalone ./
 COPY --from=builder --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder --chown=node:node /repo/apps/web/public ./apps/web/public
 
+# Amazon's RDS CA bundle, so DATABASE_SSL=verify can check the database
+# certificate (DATABASE_CA_CERT_FILE points here in the task definitions).
+ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/certs/rds-global-bundle.pem
+
 # The release tag (commit SHA) the deploy built, reported by /api/health so
 # smoke tests and rollbacks can tell which version is serving. Declared late
 # so a new tag does not invalidate the cached layers above.
