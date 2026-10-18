@@ -74,6 +74,9 @@ export async function isRegisteredEmail(email: string): Promise<boolean> {
 /**
  * Every attendee eligible to be matched, minus the requester.
  * `excludeId` is applied in SQL so the excluded row never reaches the process.
+ *
+ * @deprecated Retired with the global /api/match (R07): spans every organization
+ * and event and ignores visibility. Use the event-scoped ParticipantRepository.
  */
 export async function listMatchCandidates(
   excludeId: string | null
@@ -89,7 +92,11 @@ export async function listMatchCandidates(
   return rows;
 }
 
-/** Distinct non-empty domains, for the profile dropdown. */
+/**
+ * Distinct non-empty domains, for the profile dropdown.
+ *
+ * @deprecated Retired with /api/domains (R07): spans every organization.
+ */
 export async function listDomains(): Promise<string[]> {
   const { rows } = await query<{ domain: string }>(
     `select distinct domain
