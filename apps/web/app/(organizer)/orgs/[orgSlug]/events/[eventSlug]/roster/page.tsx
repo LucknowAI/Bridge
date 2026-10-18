@@ -57,7 +57,7 @@ export default async function RosterPage({ params, searchParams }: {
         label={`Send invitations to ${pending} not yet invited`} pendingLabel="Sending invitations…" />}
     </section>}
     {!roster.length ? <p className="empty-state">No attendees yet. Import an Excel roster to invite people to this event.</p> :
-    <div style={{ overflowX: "auto", marginTop: 20 }}><table style={table}>
+    <div style={{ overflowX: "auto", marginTop: 20, position: "relative" }}><table style={table}>
       <thead><tr><th>Name</th><th>E-mail</th><th>Phone</th><th>Role</th><th>Status</th><th><span className="visually-hidden">Actions</span></th></tr></thead>
       <tbody>{roster.map(({ person, facts, state }) => {
         const id = String(person.id);
