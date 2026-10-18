@@ -1,0 +1,57 @@
+/* Matches apps/web/app/globals.css: dark surfaces, amber accent. */
+:root {
+  --pf-v5-global--FontFamily--text: Inter, system-ui, sans-serif;
+  --pf-v5-global--FontFamily--heading: Inter, system-ui, sans-serif;
+  --pf-v5-global--primary-color--100: #f59e0b;
+  --pf-v5-global--primary-color--200: #d97706;
+  --pf-v5-global--link--Color: #f59e0b;
+  --pf-v5-global--link--Color--hover: #fbbf24;
+  --pf-v5-global--Color--100: #f4f4f5;
+  --pf-v5-global--Color--200: #a1a1aa;
+  --pf-v5-global--BackgroundColor--100: #151519;
+  --pf-v5-global--BorderColor--100: #3f3f46;
+}
+
+html, body, .pf-v5-c-login {
+  background: #0a0a0e !important;
+  color: #f4f4f5;
+}
+
+.pf-v5-c-login__main {
+  background: #151519;
+  border: 1px solid #333;
+  border-radius: 14px;
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body,
+.pf-v5-c-login__main-footer,
+.pf-v5-c-title,
+.pf-v5-c-form__label-text {
+  color: #f4f4f5;
+}
+
+#kc-header-wrapper {
+  color: #f59e0b;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.pf-v5-c-button.pf-m-primary {
+  --pf-v5-c-button--m-primary--BackgroundColor: #f59e0b;
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: #fbbf24;
+  --pf-v5-c-button--m-primary--Color: #0a0a0e;
+  --pf-v5-c-button--m-primary--hover--Color: #0a0a0e;
+  font-weight: 700;
+}
+
+.pf-v5-c-form-control {
+  --pf-v5-c-form-control--BackgroundColor: #0a0a0e;
+  --pf-v5-c-form-control--Color: #f4f4f5;
+}
+
+:where(a, button, input):focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 3px;
+}

@@ -327,7 +327,9 @@ resource "aws_ecs_task_definition" "keycloak" {
         # Tokens must be issued with the hostname the browser uses, or `iss`
         # will not match what the app verifies.
         { name = "KC_HOSTNAME", value = local.keycloak_public_origin },
-        { name = "KC_HOSTNAME_STRICT", value = "false" },
+        # Supported shared-domain setup: a fixed public hostname, while the app's
+        # back-channel calls over Cloud Map keep their internal URLs.
+        { name = "KC_HOSTNAME_BACKCHANNEL_DYNAMIC", value = "true" },
         # TLS terminates at the ALB, so Keycloak speaks HTTP but must trust the
         # X-Forwarded-* headers to build correct absolute URLs.
         { name = "KC_PROXY_HEADERS", value = "xforwarded" },

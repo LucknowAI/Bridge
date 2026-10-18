@@ -5,7 +5,7 @@ import { getContainer } from "../../src/composition/container";
 import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { Intent } from "../../src/domain/participant/intent";
 import { ValidationError } from "../../src/domain/shared/validation";
-import { clearSession, getSession } from "../../lib/session";
+import { clearSession, endIdentityProviderSession, getSession } from "../../lib/session";
 import { runFormAction, type FormState } from "../../lib/form-state";
 import { redirect } from "next/navigation";
 
@@ -48,7 +48,9 @@ async function saveProfile(eventSlug: string, formData: FormData) {
 }
 
 export async function signOutCurrentUser() {
+  const session = await getSession();
   await clearSession();
+  await endIdentityProviderSession(session);
   redirect("/login");
 }
 

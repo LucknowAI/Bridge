@@ -107,7 +107,9 @@ The first command imports the global attendee directory so the organizer account
 | `npm run db:seed` | Upsert demo roster, organization, event, and organizer |
 | `npm run db:import -- <file> [event-slug]` | Import attendee rows and optionally attach them to an event |
 | `npm run keycloak:wait` | Wait for the configured Keycloak realm to respond |
-| `npm run keycloak:sync` | Apply the client secret and Google credentials from `.env` to an existing realm |
+| `npm run keycloak:sync` | Bring an existing realm up to date: client secret, Google credentials, the account-linking flow (Google joins an account an e-mail code created), and the site login theme. Run after the first Keycloak start and after upgrades |
+| `npm run account:disable -- <email>` | Block sign-in and end every session (database and Keycloak); `account:enable` undoes it |
+| `npm run account:revoke-sessions -- <email>` | Sign the person out everywhere without disabling the account |
 | `npm run docker:up` | Build images and start the local Compose stack |
 
 `DATABASE_URL` should point at `localhost` for commands run on the host. Compose sets the service hostname `postgres` inside containers.

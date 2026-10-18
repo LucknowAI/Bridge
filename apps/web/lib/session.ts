@@ -5,6 +5,7 @@ import {
   unsealSession,
   sessionCookieOptions,
   isSessionActive,
+  logoutUser,
   type Session,
 } from "@match-maker/auth";
 import { attendees, events } from "@match-maker/db";
@@ -32,6 +33,20 @@ export async function setSession(
     await sealSession(session),
     sessionCookieOptions(config.maxAge)
   );
+}
+
+/**
+ * Google sign-ins also hold a Keycloak SSO session. Ending it server-side means
+ * the next Google sign-in starts fresh, without sending the browser through
+ * Keycloak's "Do you want to log out?" page. Never blocks signing out.
+ */
+export async function endIdentityProviderSession(session: Session | null): Promise<void> {
+  if (session?.method !== "google") return;
+  try {
+    await logoutUser(session.sub);
+  } catch (error) {
+    console.error("[auth] could not end the Keycloak session:", error);
+  }
 }
 
 export async function clearSession(): Promise<void> {
