@@ -33,6 +33,7 @@ export {
   isUserEnabled,
   setUserEnabled,
   logoutUser,
+  deleteUser,
   resetCaches,
   type Pkce,
   type TokenSet,

@@ -43,7 +43,7 @@ async function importRoster(organizationSlug: string, eventSlug: string, formDat
   const event = await container.events.findBySlug(organizationSlug, eventSlug);
   if (!event) throw new Error("Event not found");
   const { records, skipped } = parseRosterWorkbook(await file.arrayBuffer());
-  const result = await importEventRoster({ eventId: event.id, organizerId: session.attendeeId, records }, container.events);
+  const result = await importEventRoster({ eventId: event.id, organizerId: session.attendeeId, records }, container.events, container.audit);
   const report = new URLSearchParams({
     imported: String(result.attached), skipped: String(skipped), already: String(result.alreadyOnRoster),
     kept: String(result.keptExisting), phones: String(result.phoneConflicts),
@@ -73,7 +73,7 @@ async function saveEvent(organizationSlug: string, eventSlug: string, formData: 
     status: status as "draft" | "open" | "closed",
     intents,
     zones,
-  }, container.events);
+  }, container.events, container.audit);
   redirect(`/orgs/${organizationSlug}/events/${eventSlug}?saved=1`);
 }
 
@@ -88,7 +88,7 @@ async function queueMatches(organizationSlug: string, eventSlug: string) {
   const event = await container.events.findBySlug(organizationSlug, eventSlug);
   if (!event) throw new Error("Event not found");
   assertEventAllows(event.status, "computeMatches");
-  if (event.status === "draft") await updateEvent({ eventId: event.id, organizerId: session.attendeeId, status: "open" }, container.events);
+  if (event.status === "draft") await updateEvent({ eventId: event.id, organizerId: session.attendeeId, status: "open" }, container.events, container.audit);
   const queued = await queueEventMatches({ eventId: event.id, organizerId: session.attendeeId }, container.events, container.enqueueEmbedding);
   redirect(`/orgs/${organizationSlug}/events/${eventSlug}/matching?queued=${queued}`);
 }
@@ -138,7 +138,7 @@ export async function updateProfileFormAction(organizationSlug: string, eventSlu
       shown: formData.get(`${key}.shown`) === "on",
       required: formData.get(`${key}.required`) === "on",
     }])) as Record<ProfileFieldKey, ProfileFieldSetting>;
-    await configureProfileForm({ eventId: event.id, organizerId: session.attendeeId, fields, currentConfig: event.form_config }, container.events);
+    await configureProfileForm({ eventId: event.id, organizerId: session.attendeeId, fields, currentConfig: event.form_config }, container.events, container.audit);
     redirect(`/orgs/${organizationSlug}/events/${eventSlug}?form=saved`);
   });
 }

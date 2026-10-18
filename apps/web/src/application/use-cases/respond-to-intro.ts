@@ -1,10 +1,11 @@
 import type { IntroRepository } from "../ports/intro-repository";
 import type { NotificationPort } from "../ports/notification";
 import type { ParticipantRepository } from "../ports/participant-repository";
+import type { AuditLog } from "../ports/audit-log";
 
 export async function respondToIntro(
   input: { eventId: string; introId: string; actorId: string; accept: boolean; eventName?: string },
-  dependencies: { intros: IntroRepository; participants: ParticipantRepository; notifications?: NotificationPort }
+  dependencies: { intros: IntroRepository; participants: ParticipantRepository; notifications?: NotificationPort; audit?: AuditLog }
 ) {
   const existing = await dependencies.intros.findById(input.eventId, input.introId);
   if (!existing) throw new Error("Intro request not found");
@@ -12,6 +13,9 @@ export async function respondToIntro(
     throw new Error("This person is no longer part of the event");
   }
   const updated = await dependencies.intros.respond(input.eventId, input.introId, input.actorId, input.accept ? "accepted" : "declined");
+  if (updated.status === "accepted") {
+    await dependencies.audit?.record({ eventId: input.eventId, actorId: input.actorId, action: "contacts.revealed", subjectId: updated.requesterId });
+  }
   if (updated.status === "accepted" && dependencies.notifications) {
     const requester = await dependencies.participants.findProfile(input.eventId, updated.requesterId);
     const recipient = await dependencies.participants.findProfile(input.eventId, updated.recipientId);

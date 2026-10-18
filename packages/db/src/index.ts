@@ -12,3 +12,4 @@ export * as matches from "./repositories/matches";
 export * as events from "./repositories/events";
 export * as matchingJobs from "./repositories/matching-jobs";
 export * as housekeeping from "./repositories/housekeeping";
+export * as audit from "./repositories/audit";

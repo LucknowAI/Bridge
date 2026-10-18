@@ -93,6 +93,23 @@ export async function revokeSessions(email: string): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
+/**
+ * Erases a person for a deletion request: their attendee row and everything
+ * that cascades from it (event participation, matches, introductions, login
+ * challenges), plus cached explanations and login challenges by e-mail.
+ * Returns the erased id, or null when the e-mail is unknown.
+ */
+export async function erase(email: string): Promise<string | null> {
+  const normalized = normalizeEmail(email);
+  const { rows } = await query<{ id: string }>(`select id from registered_attendees where email = $1`, [normalized]);
+  const id = rows[0]?.id;
+  if (!id) return null;
+  await query(`delete from pair_explanations where viewer_id = $1 or candidate_id = $1`, [id]);
+  await query(`delete from login_challenges where email = $1`, [normalized]);
+  await query(`delete from registered_attendees where id = $1`, [id]);
+  return id;
+}
+
 /** True when the e-mail is on the attendee roster — the gate for every login. */
 export async function isRegisteredEmail(email: string): Promise<boolean> {
   const { rows } = await query<{ exists: boolean }>(

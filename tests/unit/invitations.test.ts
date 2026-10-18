@@ -84,6 +84,17 @@ describe("setAttendeeAccess", () => {
   });
 });
 
+describe("audit records", () => {
+  it("records invitations sent and access changes", async () => {
+    const { events, notifications } = ports([{ attendee_id: "a", email: "a@example.com", name: "A" }]);
+    const audit = { record: vi.fn(async () => {}), recent: vi.fn() };
+    await sendInvitations(event, { events, notifications, audit });
+    await setAttendeeAccess({ eventId: "event", organizerId: "organizer", attendeeId: "a", revoked: true }, { events, audit });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "invitations.sent", actorId: "organizer", details: expect.objectContaining({ sent: 1 }) }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "access.removed", subjectId: "a" }));
+  });
+});
+
 describe("renderInvitationEmail", () => {
   it("links to the event and escapes names in the HTML", () => {
     const mail = renderInvitationEmail({ name: "<script>", eventName: "Summit & Co", organizationName: "Acme", eventUrl: event.eventUrl });

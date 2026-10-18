@@ -71,6 +71,10 @@ export class PostgresParticipantRepository implements ParticipantRepository {
         input.yearsOfExperience, input.mostImpressiveBuild, input.formVersion ?? 0, input.visible ?? null]
     );
     if (!rowCount) throw new Error("This attendee is not on the event roster");
+    if (input.visible === false) {
+      // Hidden profiles are not explained to others any more.
+      await query(`delete from pair_explanations where event_id = $1 and candidate_id = $2`, [input.eventId, input.attendeeId]);
+    }
     const saved = await this.findProfile(input.eventId, input.attendeeId);
     if (!saved) throw new Error("Could not load the saved profile");
     return saved;

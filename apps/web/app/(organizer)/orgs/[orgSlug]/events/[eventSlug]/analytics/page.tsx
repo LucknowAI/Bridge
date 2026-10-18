@@ -5,7 +5,7 @@ import { requireOrganizerEvent } from "@/src/lib/auth";
 export default async function AnalyticsPage({ params }: { params: Promise<{ orgSlug: string; eventSlug: string }> }) {
   const { orgSlug, eventSlug } = await params;
   const { event, container } = await requireOrganizerEvent(orgSlug, eventSlug);
-  const analytics = await container.events.analytics(event.id);
+  const [analytics, activity] = await Promise.all([container.events.analytics(event.id), container.audit.recent(event.id)]);
   const completion = analytics.roster ? Math.round(analytics.profiles / analytics.roster * 100) : 0;
   return <main style={shell}>
     <nav><Link href={`/orgs/${orgSlug}/events/${eventSlug}`}>← Dashboard</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/roster`}>Roster</Link><Link href={`/orgs/${orgSlug}/events/${eventSlug}/matching`}>Matching</Link><SignOutButton /></nav>
@@ -20,7 +20,30 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ orgS
       <Card label="Pending introductions" value={analytics.pendingIntros} />
       <Card label="Accepted introductions" value={analytics.acceptedIntros} />
     </section>
+    <h2>Recent activity</h2>
+    {!activity.length ? <p className="empty-state">No recorded activity yet.</p> : <ul style={{ display: "grid", gap: 8, padding: 0, listStyle: "none" }}>
+      {activity.map((item) => <li key={item.id} style={{ padding: "10px 14px", borderRadius: 10, background: "#151519" }}>
+        <strong>{ACTIVITY_LABELS[item.action] ?? item.action}</strong>
+        {item.subjectName && <> · {item.subjectName}</>}
+        <br /><small style={{ color: "var(--muted)" }}>{item.actorName ?? "System"} · {item.createdAt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}{summary(item.details)}</small>
+      </li>)}
+    </ul>}
   </main>;
+}
+
+const ACTIVITY_LABELS: Record<string, string> = {
+  "roster.imported": "Roster imported",
+  "invitations.sent": "Invitations sent",
+  "access.removed": "Access removed",
+  "access.restored": "Access restored",
+  "event.updated": "Settings changed",
+  "profile_form.updated": "Profile form changed",
+  "contacts.revealed": "Introduction accepted, contacts shared",
+};
+
+function summary(details: Record<string, unknown>): string {
+  const parts = ["attached", "sent", "failed", "version"].filter((key) => typeof details[key] === "number").map((key) => `${key} ${details[key]}`);
+  return parts.length ? ` · ${parts.join(", ")}` : "";
 }
 
 function Card({ label, value, note }: { label: string; value: number | string; note?: string }) {

@@ -31,7 +31,8 @@
     "keycloak:sync": "tsx tools/sync-keycloak.ts",
     "account:disable": "tsx tools/manage-account.ts disable",
     "account:enable": "tsx tools/manage-account.ts enable",
-    "account:revoke-sessions": "tsx tools/manage-account.ts revoke-sessions"
+    "account:revoke-sessions": "tsx tools/manage-account.ts revoke-sessions",
+    "account:erase": "tsx tools/manage-account.ts erase"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
