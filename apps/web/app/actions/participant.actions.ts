@@ -45,6 +45,7 @@ async function saveProfile(eventSlug: string, formData: FormData) {
     selfDescription: nullable(formData.get("selfDescription")),
     yearsOfExperience: parseYears(formData.get("yearsOfExperience")),
     mostImpressiveBuild: nullable(formData.get("mostImpressiveBuild")),
+    visible: formData.get("visible") === "on",
   }, { participants: container.participants, enqueueMatching: container.enqueueEmbedding }, readProfileForm(event.form_config));
 }
 

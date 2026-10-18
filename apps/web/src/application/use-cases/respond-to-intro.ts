@@ -8,6 +8,9 @@ export async function respondToIntro(
 ) {
   const existing = await dependencies.intros.findById(input.eventId, input.introId);
   if (!existing) throw new Error("Intro request not found");
+  if (input.accept && !(await dependencies.participants.hasEventAccess(input.eventId, existing.requesterId))) {
+    throw new Error("This person is no longer part of the event");
+  }
   const updated = await dependencies.intros.respond(input.eventId, input.introId, input.actorId, input.accept ? "accepted" : "declined");
   if (updated.status === "accepted" && dependencies.notifications) {
     const requester = await dependencies.participants.findProfile(input.eventId, updated.requesterId);

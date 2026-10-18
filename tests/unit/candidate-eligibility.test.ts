@@ -64,7 +64,9 @@ describe("intro request recipient", () => {
       hasEventAccess: vi.fn(async () => true),
       findProfile: vi.fn(async (_eventId: string, id: string) => (id === "requester" ? profile("requester") : recipient)),
     } as unknown as ParticipantRepository;
-    const intros = { create: vi.fn(async () => ({ id: "intro" })) } as unknown as IntroRepository;
+    const intros = {
+      create: vi.fn(async () => ({ id: "intro" })), findBetween: vi.fn(async () => []), countPendingOutgoing: vi.fn(async () => 0),
+    } as unknown as IntroRepository;
     return { participants, intros };
   }
   const send = (dependencies: ReturnType<typeof setup>, recipientId: string) =>

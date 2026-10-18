@@ -17,6 +17,7 @@ export interface ProfileFormValues {
   interests: string[];
   intent: string;
   venueZone: string | null;
+  visible: boolean;
 }
 
 const label = (intent: string) => intent.replaceAll("_", " ").toLowerCase();
@@ -52,6 +53,14 @@ export default function ProfileForm({ action, profile, intents, zones, form }: {
       options={intents.map((intent) => ({ value: intent, label: label(intent) }))} />
     {zones.length > 0 && <SelectField label="Where can people find you?" name="venueZone" state={state} defaultValue={profile.venueZone}
       placeholder="Choose a venue zone" options={zones.map((zone) => ({ value: zone, label: zone }))} />}
+    <div className="field" style={{ gridColumn: "1 / -1" }}>
+      <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 400 }}>
+        <input type="hidden" name="visible.submitted" value="1" />
+        <input type="checkbox" name="visible" defaultChecked={state.values["visible.submitted"] ? state.values.visible === "on" : profile.visible} />
+        Show my profile in other attendees&apos; matches and search
+      </label>
+      <small className="field-hint">Hidden, you can still browse and keep your accepted connections; nobody new can find you or request an introduction.</small>
+    </div>
     <div className="form-actions"><SubmitButton pendingLabel="Saving your profile…">Save profile and find matches</SubmitButton></div>
   </form>;
 }

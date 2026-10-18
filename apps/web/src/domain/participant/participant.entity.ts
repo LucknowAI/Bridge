@@ -40,7 +40,7 @@ export type ParticipantProfileInput = Pick<
   | "interests"
   | "venueZone"
   | "formVersion"
->;
+> & { visible?: boolean };
 
 export function profileText(profile: ParticipantProfile): string {
   return [

@@ -63,11 +63,12 @@ export class PostgresParticipantRepository implements ParticipantRepository {
          intent = $3, interests = $4, venue_zone = $5,
          about_me = $6, designation = $7, domain = $8,
          self_description = $9, years_of_experience = $10,
-         most_impressive_build = $11, profile_form_version = $12, embedding = null, profile_updated_at = now(), updated_at = now()
+         most_impressive_build = $11, profile_form_version = $12, visible = coalesce($13, visible),
+         embedding = null, profile_updated_at = now(), updated_at = now()
        where event_id = $1 and attendee_id = $2`,
       [input.eventId, input.attendeeId, input.intent, input.interests, input.venueZone,
         input.aboutMe, input.designation, input.domain, input.selfDescription,
-        input.yearsOfExperience, input.mostImpressiveBuild, input.formVersion ?? 0]
+        input.yearsOfExperience, input.mostImpressiveBuild, input.formVersion ?? 0, input.visible ?? null]
     );
     if (!rowCount) throw new Error("This attendee is not on the event roster");
     const saved = await this.findProfile(input.eventId, input.attendeeId);

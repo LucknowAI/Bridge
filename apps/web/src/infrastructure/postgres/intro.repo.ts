@@ -23,9 +23,7 @@ export class PostgresIntroRepository implements IntroRepository {
     const { rows } = await query<IntroRow>(
       `insert into intro_requests (event_id, requester_id, recipient_id, message)
        values ($1, $2, $3, $4)
-       on conflict (event_id, requester_id, recipient_id) do update
-         set status = 'pending', message = excluded.message, created_at = now(), responded_at = null
-         where intro_requests.status = 'declined'
+       on conflict (event_id, requester_id, recipient_id) do nothing
        returning ${INTRO_COLUMNS}`,
       [input.eventId, input.requesterId, input.recipientId, message]
     );
@@ -52,11 +50,30 @@ export class PostgresIntroRepository implements IntroRepository {
     return mapIntro(rows[0]);
   }
 
-  async listForParticipant(eventId: string, participantId: string): Promise<IntroRequest[]> {
+  async findBetween(eventId: string, a: string, b: string): Promise<IntroRequest[]> {
     const { rows } = await query<IntroRow>(
       `select ${INTRO_COLUMNS} from intro_requests
-        where event_id = $1 and (requester_id = $2 or recipient_id = $2)
-        order by created_at desc`,
+        where event_id = $1 and ((requester_id = $2 and recipient_id = $3) or (requester_id = $3 and recipient_id = $2))`,
+      [eventId, a, b]
+    );
+    return rows.map(mapIntro);
+  }
+
+  async countPendingOutgoing(eventId: string, requesterId: string): Promise<number> {
+    const { rows } = await query<{ count: number }>(
+      `select count(*)::int as count from intro_requests where event_id = $1 and requester_id = $2 and status = 'pending'`,
+      [eventId, requesterId]
+    );
+    return rows[0]?.count ?? 0;
+  }
+
+  async listForParticipant(eventId: string, participantId: string): Promise<IntroRequest[]> {
+    const { rows } = await query<IntroRow>(
+      `select ${INTRO_COLUMNS_R} from intro_requests r
+         join event_participants other on other.event_id = r.event_id
+          and other.attendee_id = case when r.requester_id = $2 then r.recipient_id else r.requester_id end
+        where r.event_id = $1 and (r.requester_id = $2 or r.recipient_id = $2) and other.revoked_at is null
+        order by r.created_at desc`,
       [eventId, participantId]
     );
     return rows.map(mapIntro);
@@ -71,6 +88,8 @@ export class PostgresIntroRepository implements IntroRepository {
          left join event_participants cp on cp.event_id = r.event_id and cp.attendee_id = c.id
         where r.event_id = $1 and r.status = 'accepted'
           and (r.requester_id = $2 or r.recipient_id = $2)
+          -- Someone removed from the event no longer has their contact shown.
+          and cp.revoked_at is null
         order by r.responded_at desc`,
       [eventId, participantId]
     );
