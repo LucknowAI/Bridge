@@ -213,6 +213,8 @@ resource "aws_ecs_task_definition" "web" {
         { name = "PORT", value = "3000" },
         { name = "APP_BASE_URL", value = local.app_base_url },
         { name = "DEFAULT_EVENT_SLUG", value = var.default_event_slug },
+        # One ALB appends the client address to X-Forwarded-For.
+        { name = "TRUSTED_PROXY_HOPS", value = "1" },
         { name = "GEMINI_LLM_MODEL", value = "gemini-3.8-flash" },
         { name = "KEYCLOAK_ISSUER", value = local.keycloak_issuer },
         { name = "KEYCLOAK_INTERNAL_ISSUER", value = local.keycloak_internal_issuer },

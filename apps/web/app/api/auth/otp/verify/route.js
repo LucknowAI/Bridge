@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { attendees } from "@match-maker/db";
 import { verifyCode, ensureUser, CODE_LENGTH } from "@match-maker/auth";
 import { canReturnToPath, setSession } from "@/lib/session";
+import { limitByIp, requireJson } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ const FAILURE_MESSAGES = {
  */
 export async function POST(request) {
   try {
+    const refused = requireJson(request) ?? await limitByIp(request, "otpVerify");
+    if (refused) return refused;
     const { phone, email, code, returnTo } = await request.json().catch(() => ({}));
 
     const normalizedCode = String(code ?? "").replace(/\D/g, "");

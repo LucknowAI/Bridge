@@ -16,6 +16,8 @@ vi.mock("@/lib/session", () => ({
   canReturnToPath: mocks.canReturnToPath, clientIp: () => "127.0.0.1", setSession: mocks.setSession,
 }));
 vi.mock("@match-maker/email", () => ({ sendLoginEmail: mocks.sendLoginEmail }));
+// Per-IP limits and the JSON check are covered in request-guards.test.ts.
+vi.mock("@/lib/rate-limit", () => ({ limitByIp: async () => null, requireJson: () => null }));
 vi.mock("@match-maker/auth", () => ({
   ...mocks,
   CODE_LENGTH: 6,

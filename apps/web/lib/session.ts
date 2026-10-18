@@ -37,16 +37,18 @@ export async function clearSession(): Promise<void> {
 }
 
 /**
- * Client IP as seen behind the ALB.
+ * Client IP as reported by our own proxies, or null when unknown.
  *
- * `x-forwarded-for` accumulates hops, and only the *last* entry is added by a
- * trusted proxy — but ECS sits behind exactly one ALB, so the first entry is
- * the real client. Used only for rate-limit bookkeeping, never for authz.
+ * Each proxy appends the address it saw to `x-forwarded-for`, and anything to
+ * the left of that may be written by the caller. With TRUSTED_PROXY_HOPS
+ * proxies in front of us (1 behind the ALB), the client is the entry that many
+ * places from the end. 0 (local development) trusts no header at all.
+ * Used only for rate limiting, never for authorization.
  */
-export function clientIp(request: Request): string | null {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0]?.trim() ?? null;
-  return request.headers.get("x-real-ip");
+export function clientIp(request: Request, hops = Number(process.env.TRUSTED_PROXY_HOPS || 0)): string | null {
+  if (!Number.isInteger(hops) || hops < 1) return null;
+  const entries = (request.headers.get("x-forwarded-for") ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  return entries.length >= hops ? entries[entries.length - hops]! : null;
 }
 
 /** Apply the event roster gate before issuing an event-specific login session. */

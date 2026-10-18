@@ -29,6 +29,7 @@ const ALLOWED: Record<string, string[]> = {
   DATABASE_SSL: ["disable", "require"],
   EMBEDDING_PROVIDER: ["gemini", "local"],
   EMAIL_DEV_FALLBACK: ["true", "false"],
+  TRUSTED_PROXY_HOPS: ["0", "1", "2", "3"],
 };
 
 /** Returns one human-readable message per problem; empty when valid. */
