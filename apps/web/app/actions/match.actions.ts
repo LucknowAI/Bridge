@@ -73,5 +73,5 @@ async function queueRefresh(eventSlug: string) {
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
   assertEventAllows(event.status, "refreshMatches");
   await container.enqueueEmbedding(event.id, session.attendeeId);
-  redirect(`/e/${eventSlug}/matches?queued=1`);
+  redirect(`/e/${eventSlug}/matches`);
 }

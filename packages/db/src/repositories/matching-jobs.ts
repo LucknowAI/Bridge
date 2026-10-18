@@ -8,7 +8,18 @@ export interface MatchingJob {
   job_type: "embed" | "match";
 }
 
+/** Matches STUCK_AFTER_MS in apps/web/src/domain/matching/match-status.ts. */
+const STUCK_AFTER_MINUTES = 10;
+
 export async function enqueue(eventId: string, participantId: string, jobType: "embed" | "match" = "match"): Promise<void> {
+  // A job "running" past the stuck limit belongs to a crashed worker and would
+  // block the one-active-job index forever; release it so this request queues.
+  await query(
+    `update matching_jobs set status = 'failed'
+      where event_id = $1 and participant_id = $2 and job_type = $3 and status = 'running'
+        and started_at < now() - make_interval(mins => $4)`,
+    [eventId, participantId, jobType, STUCK_AFTER_MINUTES]
+  );
   await query(
     `insert into matching_jobs (event_id, participant_id, job_type) values ($1, $2, $3)
      on conflict (event_id, participant_id, job_type) where status in ('pending', 'running') do nothing`,

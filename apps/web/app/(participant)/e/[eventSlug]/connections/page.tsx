@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getParticipantConnections, respondToParticipantIntro, shareVenueZoneAction } from "../../../../actions/intro.actions";
 import { requireParticipantEvent } from "@/src/lib/auth";
 import { ActionForm } from "@/components/ui/form";
+import { eventAllows } from "@/src/domain/shared/event-lifecycle";
 
 export default async function ConnectionsPage({ params, searchParams }: {
   params: Promise<{ eventSlug: string }>;
@@ -29,7 +30,7 @@ export default async function ConnectionsPage({ params, searchParams }: {
             {connection.contact.email && <div><a href={`mailto:${connection.contact.email}`}>{connection.contact.email}</a></div>}
             {connection.contact.phone && <div><a href={`tel:${connection.contact.phone}`}>{connection.contact.phone}</a></div>}
             {connection.contact.venueZone && <div>At the venue: {connection.contact.venueZone}</div>}
-            {event.zones.length > 0 && <ActionForm action={shareVenueZoneAction.bind(null, eventSlug, connection.id)} label="Share my zone" pendingLabel="Sharing…">
+            {event.zones.length > 0 && eventAllows(event.status, "shareZone") && <ActionForm action={shareVenueZoneAction.bind(null, eventSlug, connection.id)} label="Share my zone" pendingLabel="Sharing…">
               <label className="visually-hidden" htmlFor={`zone-${connection.id}`}>Your venue zone</label>
               <select id={`zone-${connection.id}`} name="venueZone" required defaultValue="">
                 <option value="" disabled>Choose where you are</option>{event.zones.map((zone) => <option key={zone}>{zone}</option>)}

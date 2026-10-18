@@ -4,7 +4,7 @@
  * data are never touched. Skipped when DATABASE_URL is unset.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { query, closePool, attendees } from "@match-maker/db";
+import { query, closePool, attendees, matchingJobs } from "@match-maker/db";
 import { migrate } from "../../packages/db/src/migrate";
 import { PostgresMatchQueue } from "../../apps/web/src/infrastructure/postgres/match-queue.repo";
 
@@ -73,8 +73,20 @@ describeDb("match queue status", () => {
     expect(await queue.latestJob(otherEventId, ids.c)).toMatchObject({ status: "pending" });
   });
 
+  it("re-queues a participant whose job is stuck, leaving fresh running jobs alone", async () => {
+    await job(eventId, "c", "embed", "running", 2, 1);
+    await matchingJobs.enqueue(eventId, ids.c, "embed");
+    expect(await queue.latestJob(eventId, ids.c)).toMatchObject({ status: "running" });
+
+    await matchingJobs.enqueue(eventId, ids.b, "embed");
+    expect(await queue.latestJob(eventId, ids.b)).toMatchObject({ type: "embed", status: "pending" });
+    const { rows } = await query<{ status: string }>(
+      `select status from matching_jobs where event_id = $1 and participant_id = $2 order by created_at`, [eventId, ids.b]);
+    expect(rows.map((row) => row.status)).toEqual(["failed", "pending"]);
+  });
+
   it("lists one latest job per participant in the event", async () => {
     const jobs = await queue.latestJobsForEvent(eventId);
-    expect(jobs.map((row) => row.status).sort()).toEqual(["done", "running"]);
+    expect(jobs.map((row) => row.status).sort()).toEqual(["done", "pending", "running"]);
   });
 });
