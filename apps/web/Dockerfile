@@ -56,6 +56,12 @@ COPY --from=builder --chown=node:node /repo/apps/web/.next/standalone ./
 COPY --from=builder --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder --chown=node:node /repo/apps/web/public ./apps/web/public
 
+# The release tag (commit SHA) the deploy built, reported by /api/health so
+# smoke tests and rollbacks can tell which version is serving. Declared late
+# so a new tag does not invalidate the cached layers above.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 USER node
 EXPOSE 3000
 

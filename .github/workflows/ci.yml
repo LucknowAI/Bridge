@@ -2,13 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+  # Every pull request, whatever branch it targets.
   pull_request:
-    branches: [main]
+  # deploy.yml runs these same checks before it builds anything, so there is
+  # one definition of what a release must pass.
+  workflow_call:
+    inputs:
+      build_images:
+        description: "Also build the images (the deploy builds and pushes its own)"
+        type: boolean
+        default: true
 
-# A new push supersedes an in-flight run on the same branch.
+# A new push supersedes an in-flight run on the same branch. The workflow name
+# keeps a deploy's call to this file out of the standalone CI run's group,
+# which a push to main starts at the same time.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -83,6 +93,8 @@ jobs:
     name: Build images
     runs-on: ubuntu-latest
     needs: [quality]
+    # Push and pull_request runs have no inputs, so this is true for them.
+    if: ${{ inputs.build_images != false }}
     steps:
       - uses: actions/checkout@v4
 

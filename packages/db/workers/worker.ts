@@ -11,7 +11,7 @@ process.on("SIGTERM", () => { stopping = true; });
 
 async function main() {
   assertEnv("worker");
-  console.info("[worker] embedding and matching queue started");
+  console.info(`[worker] embedding and matching queue started (version ${process.env.APP_VERSION || "dev"})`);
   while (!stopping) {
     await sweepIfDue();
     const embedded = await processEmbedJob();

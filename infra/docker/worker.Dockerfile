@@ -16,4 +16,7 @@ COPY packages/auth packages/auth
 COPY packages/email packages/email
 
 ENV NODE_ENV=production
+# Release tag (commit SHA), logged when the worker starts.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 CMD ["npx", "tsx", "packages/db/workers/worker.ts"]
