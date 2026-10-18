@@ -59,6 +59,9 @@ export async function canReturnToPath(returnTo: string | null | undefined, atten
     const event = await events.findByEventSlug(participantRoute[1]);
     return Boolean(event && await events.isParticipant(event.id, attendeeId));
   }
+  // The event list and "new event" pages belong to the organization, not to an event.
+  const organizationRoute = returnTo.match(/^\/orgs\/([^/]+)\/events(?:\/new)?\/?$/);
+  if (organizationRoute) return events.hasOrganizationAccess(organizationRoute[1], attendeeId);
   const organizerRoute = returnTo.match(/^\/orgs\/([^/]+)\/events\/([^/]+)(?:\/|$)/);
   if (organizerRoute) {
     const event = await events.findBySlug(organizerRoute[1], organizerRoute[2]);
