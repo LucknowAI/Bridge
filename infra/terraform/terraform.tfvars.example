@@ -6,12 +6,17 @@ environment  = "prod"
 default_event_slug = "demo"
 
 # ── DNS / TLS ─────────────────────────────────────────────────
-# Leave all three empty for a first apply; the stack comes up on the ALB's own
-# DNS name over HTTP, and you can add the domain later.
+# Required when environment = "prod": the plan refuses to serve production
+# over plain HTTP. For an HTTP-only evaluation stack, set environment = "staging"
+# and leave these empty.
 domain_name          = ""
 keycloak_domain_name = ""
 acm_certificate_arn  = ""
 route53_zone_id      = ""
+
+# CIDR blocks allowed to open the Keycloak admin console through the load
+# balancer, e.g. ["203.0.113.10/32"]. Empty keeps it off the internet.
+keycloak_admin_cidrs = []
 
 # ── CI/CD ─────────────────────────────────────────────────────
 # Enables the GitHub OIDC deploy role. Format: "owner/repo".

@@ -252,8 +252,11 @@ jobs:
           set -euo pipefail
           REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-          aws ecs describe-task-definition \
-            --task-definition "$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" --query 'services[0].taskDefinition' --output text)" \
+          # Start from the family's newest revision, not the one the service is
+          # running, so settings and secrets changed by Terraform ship too.
+          FAMILY=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" \
+            --query 'services[0].taskDefinition' --output text | sed -E 's#^.*task-definition/([^:]+):[0-9]+$#\1#')
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
             --query 'taskDefinition' > taskdef.json
 
           # Production login must send real e-mail: never ship the dev fallback,
@@ -296,8 +299,9 @@ jobs:
           set -euo pipefail
           REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-          aws ecs describe-task-definition \
-            --task-definition "$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WORKER_SERVICE" --query 'services[0].taskDefinition' --output text)" \
+          FAMILY=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WORKER_SERVICE" \
+            --query 'services[0].taskDefinition' --output text | sed -E 's#^.*task-definition/([^:]+):[0-9]+$#\1#')
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
             --query 'taskDefinition' > worker-taskdef.json
 
           jq --arg IMAGE "$REGISTRY/match-maker-prod/worker:$TAG" '
@@ -327,8 +331,9 @@ jobs:
         run: |
           set -euo pipefail
           REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
-          aws ecs describe-task-definition \
-            --task-definition "$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_KEYCLOAK_SERVICE" --query 'services[0].taskDefinition' --output text)" \
+          FAMILY=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_KEYCLOAK_SERVICE" \
+            --query 'services[0].taskDefinition' --output text | sed -E 's#^.*task-definition/([^:]+):[0-9]+$#\1#')
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
             --query 'taskDefinition' > keycloak-taskdef.json
           jq --arg IMAGE "$REGISTRY/match-maker-prod/keycloak:$TAG" '
             .containerDefinitions[0].image = $IMAGE

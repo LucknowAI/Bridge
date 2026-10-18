@@ -94,7 +94,7 @@ output "secrets_manager_secret_name" {
 }
 
 output "keycloak_admin_console_url" {
-  description = "Keycloak admin console. The bootstrap password is in Secrets Manager."
+  description = "Keycloak admin console, reachable only from var.keycloak_admin_cidrs. The bootstrap password is in the identity secret."
   value       = "${local.keycloak_public_origin}/admin"
 }
 
@@ -103,8 +103,9 @@ output "post_apply_checklist" {
   value       = <<-EOT
     1. Create a Google OAuth client and set its authorised redirect URI to:
          ${local.keycloak_public_origin}/realms/${var.keycloak_realm}/broker/google/endpoint
-       Then put the id/secret into the ${aws_secretsmanager_secret.app.name} secret
-       (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) and redeploy Keycloak.
+       Then put the id/secret into the ${aws_secretsmanager_secret.identity.name} secret
+       (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET), and GOOGLE_CLIENT_ID into
+       ${aws_secretsmanager_secret.app.name} too, then redeploy web and Keycloak.
     2. Verify your sending domain in Resend and set RESEND_API_KEY in the same secret.
     3. Set GEMINI_API_KEY in the same secret.
     4. Import the attendee roster:  npm run db:import -- attendees.xlsx

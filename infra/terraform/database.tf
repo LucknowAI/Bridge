@@ -19,6 +19,18 @@ resource "random_password" "db" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
+# Least-privilege logins, created by the migration task (ensure-roles.ts). The
+# master login above is used only to run migrations.
+resource "random_password" "db_runtime" {
+  length  = 40
+  special = false
+}
+
+resource "random_password" "db_keycloak" {
+  length  = 40
+  special = false
+}
+
 resource "aws_db_parameter_group" "main" {
   name   = "${local.name}-pg16"
   family = "postgres16"
@@ -86,7 +98,11 @@ resource "aws_db_instance" "main" {
 locals {
   db_password_encoded = urlencode(random_password.db.result)
 
-  app_database_url = format(
+  db_runtime_user  = "app_runtime"
+  db_keycloak_user = "keycloak"
+
+  # Migrations only.
+  admin_database_url = format(
     "postgres://%s:%s@%s:%s/%s",
     aws_db_instance.main.username,
     local.db_password_encoded,
@@ -95,9 +111,23 @@ locals {
     aws_db_instance.main.db_name,
   )
 
+  # Web and worker: row access only.
+  app_database_url = format(
+    "postgres://%s:%s@%s:%s/%s",
+    local.db_runtime_user,
+    random_password.db_runtime.result,
+    aws_db_instance.main.address,
+    aws_db_instance.main.port,
+    aws_db_instance.main.db_name,
+  )
+
+  # verify-full checks the RDS certificate with the bundle baked into the image.
   keycloak_jdbc_url = format(
-    "jdbc:postgresql://%s:%s/keycloak",
+    "jdbc:postgresql://%s:%s/keycloak?sslmode=verify-full&sslrootcert=/opt/keycloak/conf/rds-global-bundle.pem",
     aws_db_instance.main.address,
     aws_db_instance.main.port,
   )
+
+  # Path of the RDS CA bundle inside the web, worker and migrate images.
+  database_ca_file = "/etc/ssl/certs/rds-global-bundle.pem"
 }

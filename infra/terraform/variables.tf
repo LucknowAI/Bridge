@@ -54,7 +54,7 @@ variable "enable_nat_gateway" {
 
 # ── DNS / TLS ─────────────────────────────────────────────────
 variable "domain_name" {
-  description = "Public hostname for the app, e.g. bridge.example.com. Leave empty to serve on the ALB's own DNS name over HTTP only."
+  description = "Public hostname for the app, e.g. bridge.example.com. Required (with acm_certificate_arn) when environment is prod; leave empty only for a non-prod evaluation stack served over HTTP."
   type        = string
   default     = ""
 }
@@ -69,6 +69,12 @@ variable "acm_certificate_arn" {
   description = "ARN of an existing ACM certificate covering the domains above. Required for HTTPS."
   type        = string
   default     = ""
+}
+
+variable "keycloak_admin_cidrs" {
+  description = "IPv4 CIDR blocks allowed to reach the Keycloak admin console (/admin) through the load balancer. Empty keeps it unreachable from the internet; use ECS Exec port forwarding instead."
+  type        = list(string)
+  default     = []
 }
 
 variable "route53_zone_id" {

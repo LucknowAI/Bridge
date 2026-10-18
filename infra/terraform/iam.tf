@@ -37,8 +37,12 @@ resource "aws_iam_role_policy_attachment" "ecs_execution_managed" {
 # read access — not the task role.
 data "aws_iam_policy_document" "secrets_read" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.app.arn]
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      aws_secretsmanager_secret.app.arn,
+      aws_secretsmanager_secret.identity.arn,
+      aws_secretsmanager_secret.migrate.arn,
+    ]
   }
 }
 
