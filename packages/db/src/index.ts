@@ -11,3 +11,4 @@ export * as loginChallenges from "./repositories/login-challenges";
 export * as matches from "./repositories/matches";
 export * as events from "./repositories/events";
 export * as matchingJobs from "./repositories/matching-jobs";
+export * as housekeeping from "./repositories/housekeeping";
