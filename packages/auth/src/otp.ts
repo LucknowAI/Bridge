@@ -59,26 +59,19 @@ export async function issueChallenge(input: {
 }): Promise<IssuedChallenge> {
   const config = getOtpConfig();
 
-  const recent = await loginChallenges.countRecent(
-    input.email,
-    config.rateLimitWindowSeconds
-  );
-  if (recent >= config.maxPerWindow) {
-    throw new RateLimitError(config.rateLimitWindowSeconds);
-  }
-
   const code = generateCode();
   const token = generateToken();
   const expiresAt = new Date(Date.now() + config.ttlSeconds * 1000);
 
-  await loginChallenges.create({
+  const created = await loginChallenges.createWithinLimit({
     email: input.email,
     attendeeId: input.attendeeId,
     codeHash: hashSecret(code),
     tokenHash: hashSecret(token),
     expiresAt,
     ipAddress: input.ipAddress,
-  });
+  }, { maxPerWindow: config.maxPerWindow, windowSeconds: config.rateLimitWindowSeconds });
+  if (!created) throw new RateLimitError(config.rateLimitWindowSeconds);
 
   return { code, token, expiresAt };
 }
@@ -99,15 +92,15 @@ export async function verifyCode(
   email: string,
   code: string
 ): Promise<VerifyResult> {
-  const challenge = await loginChallenges.findLiveByEmail(email);
+  // The attempt is spent before comparing, so parallel guesses share the limit.
+  const challenge = await loginChallenges.reserveAttempt(email);
   if (!challenge) return { ok: false, reason: "not_found" };
 
   if (!hashesMatch(challenge.code_hash, hashSecret(code))) {
-    const attempts = await loginChallenges.incrementAttempts(challenge.id);
     return {
       ok: false,
       reason:
-        attempts >= loginChallenges.MAX_CODE_ATTEMPTS
+        challenge.attempts >= loginChallenges.MAX_CODE_ATTEMPTS
           ? "too_many_attempts"
           : "invalid_code",
     };
