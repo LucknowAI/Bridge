@@ -64,6 +64,12 @@ describeDb("organizer roles and roster import ownership", () => {
     expect(await events.isOrganizer(eventB, ids.admin)).toBe(false);
   });
 
+  it("lets an organization admin save settings of an event they did not create", async () => {
+    const updated = await events.update({ eventId: eventA, organizerId: ids.admin, zones: ["Hall"] });
+    expect(updated?.zones).toEqual(["Hall"]);
+    expect(await events.update({ eventId: eventA2, organizerId: ids.member, zones: ["Nope"] })).toBeNull();
+  });
+
   it("lists only the events a viewer may open", async () => {
     const slugs = async (viewer: string) => (await events.listForOrganization(ORG_A, viewer)).map((event) => event.slug).sort();
     expect(await slugs(ids.admin)).toEqual([`${ORG_A}-one`, `${ORG_A}-two`]);

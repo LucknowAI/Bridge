@@ -104,7 +104,10 @@ export async function update(input: {
 }): Promise<EventRecord | null> {
   const { rows } = await query<EventRecord>(
     `${EVENT_SELECT}
-      where e.id = $1 and exists (select 1 from event_organizers eo where eo.event_id = e.id and eo.attendee_id = $2)
+      where e.id = $1
+        and (exists (select 1 from event_organizers eo where eo.event_id = e.id and eo.attendee_id = $2)
+             or exists (select 1 from organization_members m
+                         where m.organization_id = e.organization_id and m.attendee_id = $2 and m.role in ('owner', 'admin')))
       limit 1`,
     [input.eventId, input.organizerId]
   );
