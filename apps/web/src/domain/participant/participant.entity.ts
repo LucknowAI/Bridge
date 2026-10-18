@@ -19,6 +19,8 @@ export interface ParticipantProfile {
   venueZone: string | null;
   visible: boolean;
   profileComplete?: boolean;
+  /** When the profile was last saved; part of cached explanation keys. */
+  profileRevision?: string | null;
   /** Version of the event's profile form this profile was saved under. */
   formVersion?: number;
   embedding?: number[] | null;

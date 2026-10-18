@@ -5,6 +5,8 @@ import type { ParticipantProfile } from "../../domain/participant/participant.en
 const DEFAULT_MODEL = "gemini-3.8-flash";
 
 export class GeminiLlmProvider implements LlmProvider {
+  readonly promptVersion = "p1";
+
   get id(): string {
     return `gemini:${process.env.GEMINI_LLM_MODEL || DEFAULT_MODEL}`;
   }

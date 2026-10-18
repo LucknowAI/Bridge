@@ -176,6 +176,7 @@ function mapProfile(row: ProfileRow): ParticipantProfile {
     visible: row.visible,
     profileComplete: Boolean(row.profile_updated_at),
     formVersion: row.profile_form_version ?? 0,
+    profileRevision: row.profile_updated_at ? new Date(row.profile_updated_at).toISOString() : null,
     embedding: parseEmbedding(row.embedding),
   };
 }

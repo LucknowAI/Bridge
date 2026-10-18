@@ -13,6 +13,7 @@ export interface SweepResult {
   loginChallenges: number;
   rateLimitBuckets: number;
   retrievalCache: number;
+  pairExplanations: number;
 }
 
 /** Deletes rows that can no longer be used. Safe to run on any schedule. */
@@ -23,5 +24,9 @@ export async function sweepExpired(): Promise<SweepResult> {
     [RETENTION.rateLimitBucketHours]
   );
   const cache = await query(`delete from retrieval_cache where expires_at < now()`);
-  return { loginChallenges, rateLimitBuckets: buckets.rowCount ?? 0, retrievalCache: cache.rowCount ?? 0 };
+  const explanations = await query(`delete from pair_explanations where expires_at < now()`);
+  return {
+    loginChallenges, rateLimitBuckets: buckets.rowCount ?? 0, retrievalCache: cache.rowCount ?? 0,
+    pairExplanations: explanations.rowCount ?? 0,
+  };
 }

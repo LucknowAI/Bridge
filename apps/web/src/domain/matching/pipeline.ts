@@ -1,5 +1,7 @@
 import type { EmbeddingProvider } from "../../application/ports/embedding-provider";
 import type { CandidateCache } from "../../application/ports/candidate-cache";
+import type { ExplanationCache } from "../../application/ports/explanation-cache";
+import { queryContext } from "./explanation-key";
 import type { LlmProvider } from "../../application/ports/llm-provider";
 import type { MatchRepository } from "../../application/ports/match-repository";
 import type { ParticipantRepository } from "../../application/ports/participant-repository";
@@ -60,10 +62,11 @@ export class MatchingPipeline {
     matches: MatchRepository,
     private readonly embeddings: EmbeddingProvider,
     llm: LlmProvider | null,
-    cache: CandidateCache
+    cache: CandidateCache,
+    explanations: ExplanationCache | null = null
   ) {
     this.retrieve = new RetrieveStage(participants, cache);
-    this.rerank = new LlmRerankStage(llm);
+    this.rerank = new LlmRerankStage(llm, explanations);
     this.persist = new PersistStage(matches);
   }
 
@@ -124,7 +127,7 @@ export class MatchingPipeline {
       };
     }).sort((a, b) => b.score - a.score);
     const top = this.topK.execute(scored, input.limit ?? 12);
-    const { candidates: ranked } = await this.rerank.execute(viewer, top);
+    const { candidates: ranked } = await this.rerank.execute(viewer, top, queryContext(query));
     return ranked;
   }
 }

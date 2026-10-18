@@ -6,6 +6,7 @@ import { PostgresRateLimiter } from "../infrastructure/cache/postgres-rate-limit
 import { PostgresEventRepository } from "../infrastructure/postgres/event.repo";
 import { PostgresMatchQueue } from "../infrastructure/postgres/match-queue.repo";
 import { PostgresCandidateCache } from "../infrastructure/cache/postgres-candidate-cache";
+import { PostgresExplanationCache } from "../infrastructure/cache/postgres-explanation-cache";
 import { UpstashCandidateCache } from "../infrastructure/cache/upstash-candidate-cache";
 import { RealtimeNotifier } from "../infrastructure/notifications/realtime.notifier";
 import { ProviderRegistry } from "../infrastructure/providers/provider-registry";
@@ -32,7 +33,7 @@ function buildContainer() {
     matchQueue: new PostgresMatchQueue(),
     notifications: new RealtimeNotifier(),
     limiter: new PostgresRateLimiter(),
-    pipeline: new MatchingPipeline(participants, matches, embeddings, llm, candidateCache),
+    pipeline: new MatchingPipeline(participants, matches, embeddings, llm, candidateCache, new PostgresExplanationCache()),
     enqueueMatching: matchingJobs.enqueue,
     enqueueEmbedding: (eventId: string, participantId: string) => matchingJobs.enqueue(eventId, participantId, "embed"),
   };
