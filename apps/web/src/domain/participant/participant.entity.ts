@@ -19,6 +19,8 @@ export interface ParticipantProfile {
   venueZone: string | null;
   visible: boolean;
   profileComplete?: boolean;
+  /** Goes up on every save; background jobs carry the revision they reflect. */
+  revision?: number;
   /** When the profile was last saved; part of cached explanation keys. */
   profileRevision?: string | null;
   /** Version of the event's profile form this profile was saved under. */

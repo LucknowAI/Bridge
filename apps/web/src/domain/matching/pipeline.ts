@@ -30,6 +30,8 @@ export interface MatchingInput {
   query?: string;
   filters?: SearchFilters;
   limit?: number;
+  /** Profile runs from a background job: save only if the profile is still at this revision. */
+  expectedRevision?: number;
 }
 
 /**
@@ -37,6 +39,14 @@ export interface MatchingInput {
  * from an older computation can be recognised and recomputed.
  */
 export const MATCHING_PIPELINE_VERSION = `v2.${SCORING_CONFIG.version}`;
+
+/** The profile changed while matching ran; the newer job will publish instead. */
+export class StaleRevisionError extends Error {
+  constructor() {
+    super("Profile changed during matching; the newer job will publish results");
+    this.name = "StaleRevisionError";
+  }
+}
 
 /** The scorers the pipeline combines, weighted by SCORING_CONFIG. */
 export function defaultScorers() {
@@ -97,7 +107,8 @@ export class MatchingPipeline {
     const top = this.topK.execute(scored, input.limit ?? 12);
     const { candidates: ranked, rankedBy } = await this.rerank.execute(viewer, top);
 
-    await this.persist.execute(input.eventId, input.participantId, ranked, `${MATCHING_PIPELINE_VERSION}+${rankedBy}`);
+    const saved = await this.persist.execute(input.eventId, input.participantId, ranked, `${MATCHING_PIPELINE_VERSION}+${rankedBy}`, input.expectedRevision);
+    if (saved === false) throw new StaleRevisionError();
     return ranked;
   }
 

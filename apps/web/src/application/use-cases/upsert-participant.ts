@@ -4,7 +4,7 @@ import type { ParticipantRepository } from "../ports/participant-repository";
 
 export async function upsertParticipant(
   input: ParticipantProfileInput,
-  dependencies: { participants: ParticipantRepository; enqueueMatching?: (eventId: string, participantId: string) => Promise<void> },
+  dependencies: { participants: ParticipantRepository },
   form?: ProfileFormConfig
 ) {
   let values = input;
@@ -16,7 +16,6 @@ export async function upsertParticipant(
       if (!form.fields[key].shown) Object.assign(values, { [key]: existing?.[key] ?? (key === "interests" ? [] : null) });
     }
   }
-  const profile = await dependencies.participants.saveProfile(validateProfile(values, form));
-  await dependencies.enqueueMatching?.(profile.eventId, profile.attendeeId);
-  return profile;
+  // saveProfile queues the embedding and matching in the same transaction.
+  return dependencies.participants.saveProfile(validateProfile(values, form));
 }

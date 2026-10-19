@@ -26,10 +26,16 @@ interface MatchRow {
 };
 
 export class PostgresMatchRepository implements MatchRepository {
-  async save(eventId: string, participantId: string, candidates: MatchCandidate[], computationVersion: string): Promise<void> {
-    await transaction(async (client) => {
+  async save(eventId: string, participantId: string, candidates: MatchCandidate[], computationVersion: string, expectedRevision?: number): Promise<boolean> {
+    return transaction(async (client) => {
+      if (expectedRevision !== undefined) {
+        // Lock the profile row so a save cannot slip in between check and write.
+        const { rows } = await client.query<{ profile_revision: string }>(
+          `select profile_revision from event_participants where event_id = $1 and attendee_id = $2 for update`, [eventId, participantId]);
+        if (!rows[0] || Number(rows[0].profile_revision) !== expectedRevision) return false;
+      }
       await client.query(`delete from event_matches where event_id = $1 and participant_id = $2`, [eventId, participantId]);
-      if (candidates.length === 0) return;
+      if (candidates.length === 0) return true;
       // Array position is the final (possibly reranked) order, stored as rank 1..N.
       await client.query(
         `insert into event_matches
@@ -45,6 +51,7 @@ export class PostgresMatchRepository implements MatchRepository {
           candidates.map((candidate) => candidate.reason),
           candidates.map((candidate) => candidate.mutualInterest)]
       );
+      return true;
     });
   }
 

@@ -15,15 +15,21 @@ export async function processEmbedJob(): Promise<boolean> {
     }
     const container = getContainer();
     const profile = await container.participants.findProfile(job.event_id, job.participant_id);
-    if (profile) {
-      const embedding = await container.embeddings.embed(profileText(profile), "profile");
-      if (embedding) await container.participants.setEmbedding(job.event_id, job.participant_id, embedding);
+    // A newer save queued its own embed job; this one has nothing left to do.
+    if (!profile || (profile.revision ?? 0) !== job.revision) {
+      await matchingJobs.complete(job.id);
+      return true;
+    }
+    const embedding = await container.embeddings.embed(profileText(profile), "profile");
+    if (embedding && !(await container.participants.setEmbeddingAt(job.event_id, job.participant_id, embedding, job.revision))) {
+      await matchingJobs.complete(job.id);
+      return true;
     }
     await matchingJobs.complete(job.id);
-    await matchingJobs.enqueue(job.event_id, job.participant_id, "match");
+    await matchingJobs.enqueue(job.event_id, job.participant_id, "match", { revision: job.revision, trigger: job.trigger_kind });
   } catch (error) {
     console.error(`[worker:embed] job ${job.id} failed`, error);
-    await matchingJobs.fail(job.id);
+    await matchingJobs.fail(job.id, error instanceof Error ? error.message : String(error));
   }
   return true;
 }

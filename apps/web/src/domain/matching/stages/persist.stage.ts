@@ -3,7 +3,7 @@ import type { MatchCandidate } from "../match-strategy";
 
 export class PersistStage {
   constructor(private readonly matches: MatchRepository) {}
-  execute(eventId: string, participantId: string, candidates: MatchCandidate[], computationVersion: string): Promise<void> {
-    return this.matches.save(eventId, participantId, candidates, computationVersion);
+  execute(eventId: string, participantId: string, candidates: MatchCandidate[], computationVersion: string, expectedRevision?: number): Promise<boolean> {
+    return this.matches.save(eventId, participantId, candidates, computationVersion, expectedRevision);
   }
 }
