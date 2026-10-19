@@ -5,8 +5,24 @@
 # ==============================================================
 
 # Encrypts the session cookie. Generated here so it never has to be handled by a
-# human; rotating it simply signs everyone out.
+# human. Two slots make rotation free of sign-outs: the active slot seals new
+# cookies, the other is still accepted for reading (SESSION_SECRET_PREVIOUS).
+# To rotate, regenerate the inactive slot and make it active in one apply:
+#   terraform apply -replace=random_password.session_secret_b -var session_secret_active=b
+# (next time: -replace=random_password.session_secret -var session_secret_active=a)
 resource "random_password" "session_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "session_secret_b" {
+  length  = 64
+  special = false
+}
+
+# Hashes login codes; separate from the session secret so rotating that one
+# leaves codes already e-mailed valid.
+resource "random_password" "otp_pepper" {
   length  = 64
   special = false
 }
@@ -29,7 +45,9 @@ resource "random_password" "keycloak_admin_password" {
 locals {
   secret_values = {
     DATABASE_URL             = local.app_database_url
-    SESSION_SECRET           = random_password.session_secret.result
+    SESSION_SECRET           = var.session_secret_active == "a" ? random_password.session_secret.result : random_password.session_secret_b.result
+    SESSION_SECRET_PREVIOUS  = var.session_secret_active == "a" ? random_password.session_secret_b.result : random_password.session_secret.result
+    OTP_PEPPER               = random_password.otp_pepper.result
     KEYCLOAK_CLIENT_SECRET   = random_password.keycloak_client_secret.result
     GEMINI_API_KEY           = var.gemini_api_key
     UPSTASH_REDIS_REST_URL   = var.upstash_redis_rest_url

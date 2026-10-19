@@ -230,6 +230,8 @@ resource "aws_ecs_task_definition" "web" {
       secrets = [
         { name = "DATABASE_URL", valueFrom = local.secret_ref.DATABASE_URL },
         { name = "SESSION_SECRET", valueFrom = local.secret_ref.SESSION_SECRET },
+        { name = "SESSION_SECRET_PREVIOUS", valueFrom = local.secret_ref.SESSION_SECRET_PREVIOUS },
+        { name = "OTP_PEPPER", valueFrom = local.secret_ref.OTP_PEPPER },
         { name = "KEYCLOAK_CLIENT_SECRET", valueFrom = local.secret_ref.KEYCLOAK_CLIENT_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.secret_ref.RESEND_API_KEY },
         # Only its presence is read: it switches the Google sign-in option on.
