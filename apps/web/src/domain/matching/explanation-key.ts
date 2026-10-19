@@ -26,6 +26,11 @@ export function explanationKey(input: {
   ])).digest("hex");
 }
 
+/** Identifies one exact shortlist: the same pairs, in any order, give the same key. */
+export function shortlistKey(pairKeys: string[]): string {
+  return createHash("sha256").update(`order:${[...pairKeys].sort().join(",")}`).digest("hex");
+}
+
 /** The context for search explanations: the normalized query. */
 export function queryContext(query: string): string {
   return `query:${query.trim().toLowerCase().replace(/\s+/g, " ")}`;

@@ -23,4 +23,19 @@ export class PostgresExplanationCache implements ExplanationCache {
       }))), ttlSeconds]
     );
   }
+
+  async getOrder(key: string): Promise<string[] | null> {
+    const { rows } = await query<{ candidate_ids: string[] }>(
+      `select candidate_ids from rerank_orders where cache_key = $1 and expires_at > now()`, [key]);
+    return rows[0]?.candidate_ids ?? null;
+  }
+
+  async setOrder(entry: Parameters<ExplanationCache["setOrder"]>[0], ttlSeconds: number): Promise<void> {
+    await query(
+      `insert into rerank_orders (cache_key, event_id, viewer_id, candidate_ids, expires_at)
+       values ($1, $2, $3, $4::uuid[], now() + make_interval(secs => $5))
+       on conflict (cache_key) do update set candidate_ids = excluded.candidate_ids, expires_at = excluded.expires_at`,
+      [entry.key, entry.eventId, entry.viewerId, entry.candidateIds, ttlSeconds]
+    );
+  }
 }

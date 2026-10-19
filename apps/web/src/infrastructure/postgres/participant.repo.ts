@@ -84,6 +84,7 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     if (input.visible === false) {
       // Hidden profiles are not explained to others any more.
       await query(`delete from pair_explanations where event_id = $1 and candidate_id = $2`, [input.eventId, input.attendeeId]);
+      await query(`delete from rerank_orders where event_id = $1 and $2::uuid = any(candidate_ids)`, [input.eventId, input.attendeeId]);
     }
     const saved = await this.findProfile(input.eventId, input.attendeeId);
     if (!saved) throw new Error("Could not load the saved profile");

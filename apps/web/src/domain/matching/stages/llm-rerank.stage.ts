@@ -2,7 +2,7 @@ import type { LlmProvider } from "../../../application/ports/llm-provider";
 import type { ParticipantProfile } from "../../participant/participant.entity";
 import type { MatchCandidate } from "../match-strategy";
 import type { ExplanationCache } from "../../../application/ports/explanation-cache";
-import { EXPLANATION_TTL_SECONDS, explanationKey } from "../explanation-key";
+import { EXPLANATION_TTL_SECONDS, explanationKey, shortlistKey } from "../explanation-key";
 
 export interface RerankResult {
   candidates: MatchCandidate[];
@@ -13,8 +13,9 @@ export interface RerankResult {
 /**
  * Orders the shortlist with the model and explains each match. Explanations
  * are cached per viewer -> candidate pair: when every pair already has one,
- * the model is not called and the scored order stands. A cached reason never
- * decides the order of a shortlist.
+ * the model is not called, and its earlier order for this exact shortlist is
+ * reused (the scored order stands if there is none). A pair's cached reason
+ * never decides an order.
  */
 /** Below this much remaining time a rerank call is not worth starting. */
 const MIN_RERANK_MS = 750;
@@ -36,7 +37,7 @@ export class LlmRerankStage {
     const keys = candidates.map(keyFor);
     const cached = await this.readCache(keys);
     const withCached = candidates.map((candidate, index) => ({ ...candidate, reason: cached.get(keys[index]) ?? candidate.reason }));
-    if (cached.size === candidates.length) return { candidates: withCached, rankedBy: "score" };
+    if (cached.size === candidates.length) return this.withStoredOrder(keys, withCached, provider.id);
     // Too little of the request's budget left for a model call: keep the scored order.
     if (options.timeoutMs !== undefined && options.timeoutMs < MIN_RERANK_MS) {
       return { candidates: withCached.map(addFallbackReason), rankedBy: "score" };
@@ -46,12 +47,27 @@ export class LlmRerankStage {
       const reranked = await provider.rerank(viewer, candidates, { timeoutMs: options.timeoutMs });
       await this.writeCache(viewer, reranked.filter((candidate) => candidate.reason).map((candidate) => ({
         key: keyFor(candidate), candidateId: candidate.participant.attendeeId, reason: candidate.reason!,
-      })));
+      })), { key: shortlistKey(keys), candidateIds: reranked.map((candidate) => candidate.participant.attendeeId) });
       return { candidates: reranked.map(addFallbackReason), rankedBy: `llm:${provider.id}` };
     } catch (error) {
       console.warn("[matching] LLM rerank unavailable; using scored order", error);
       return { candidates: withCached.map(addFallbackReason), rankedBy: "score" };
     }
+  }
+
+  private async withStoredOrder(keys: string[], candidates: MatchCandidate[], providerId: string): Promise<RerankResult> {
+    let order: string[] | null = null;
+    try {
+      order = await this.cache!.getOrder(shortlistKey(keys));
+    } catch (error) {
+      console.warn("[matching] explanation cache unavailable", error);
+    }
+    const position = new Map((order ?? []).map((id, index) => [id, index]));
+    if (!order || !candidates.every((candidate) => position.has(candidate.participant.attendeeId))) {
+      return { candidates, rankedBy: "score" };
+    }
+    const sorted = [...candidates].sort((a, b) => position.get(a.participant.attendeeId)! - position.get(b.participant.attendeeId)!);
+    return { candidates: sorted, rankedBy: `llm:${providerId}` };
   }
 
   private async readCache(keys: string[]): Promise<Map<string, string>> {
@@ -64,10 +80,11 @@ export class LlmRerankStage {
     }
   }
 
-  private async writeCache(viewer: ParticipantProfile, entries: Array<{ key: string; candidateId: string; reason: string }>) {
+  private async writeCache(viewer: ParticipantProfile, entries: Array<{ key: string; candidateId: string; reason: string }>, order: { key: string; candidateIds: string[] }) {
     if (!this.cache || !entries.length) return;
     try {
       await this.cache.setMany(entries.map((entry) => ({ ...entry, eventId: viewer.eventId, viewerId: viewer.attendeeId })), EXPLANATION_TTL_SECONDS);
+      await this.cache.setOrder({ ...order, eventId: viewer.eventId, viewerId: viewer.attendeeId }, EXPLANATION_TTL_SECONDS);
     } catch (error) {
       console.warn("[matching] could not cache explanations", error);
     }
