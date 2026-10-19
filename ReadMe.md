@@ -102,7 +102,7 @@ The first command imports the global attendee directory so the organizer account
 | `npm run build` | Build workspace packages and the app |
 | `npm run typecheck` | Type-check all workspaces |
 | `npm run lint` | Run ESLint |
-| `npm test` | Run unit and integration suites |
+| `npm test` | Run unit and integration suites. Integration suites skip without Postgres/Keycloak; set `REQUIRE_SERVICES=db,keycloak` to fail instead (CI does, and `tools/check-test-report.ts` fails on any skipped test). Stop a locally running worker first, or it claims the pipeline test's jobs |
 | `npm run db:migrate` | Apply pending PostgreSQL migrations |
 | `npm run db:seed` | Upsert demo roster, organization, event, and organizer |
 | `npm run db:import -- <file> [event-slug]` | Import attendee rows and optionally attach them to an event |
