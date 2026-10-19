@@ -5,6 +5,7 @@ import { PostgresParticipantRepository } from "../infrastructure/postgres/partic
 import { PostgresRateLimiter } from "../infrastructure/cache/postgres-rate-limiter";
 import { PostgresEventRepository } from "../infrastructure/postgres/event.repo";
 import { PostgresAuditLog } from "../infrastructure/postgres/audit.repo";
+import { PostgresLocationRepository } from "../infrastructure/postgres/location.repo";
 import { PostgresMatchQueue } from "../infrastructure/postgres/match-queue.repo";
 import { PostgresCandidateCache } from "../infrastructure/cache/postgres-candidate-cache";
 import { PostgresExplanationCache } from "../infrastructure/cache/postgres-explanation-cache";
@@ -37,6 +38,7 @@ function buildContainer() {
     candidateCache,
     matchQueue: new PostgresMatchQueue(),
     audit: new PostgresAuditLog(),
+    locations: new PostgresLocationRepository(),
     notifications: new RealtimeNotifier(),
     limiter: new PostgresRateLimiter(),
     pipeline: new MatchingPipeline(participants, matches, embeddings, llm, candidateCache, new PostgresExplanationCache()),
