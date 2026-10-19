@@ -103,6 +103,32 @@ describeDb("durable matching jobs", () => {
     expect((await jobsOf("cy")).find((row) => row.id === job!.id)?.status).toBe("done");
   });
 
+  it("refreshes the people a profile change affects, coalesced and without cascading", async () => {
+    // ann lists bo; cy has no matches yet; dee's (one-slot) list is full without bo; eve never finished a profile.
+    await attendees.upsertMany(["dee", "eve"].map((key) => ({ name: `Jobs ${key}`, email: email(key) })));
+    for (const key of ["dee", "eve"]) ids[key] = (await attendees.findByEmail(email(key)))!.id;
+    await events.attachRoster(eventId, [ids.dee, ids.eve]);
+    await save("dee", "Dee's profile");
+    await query(`update matching_jobs set status = 'done' where event_id = $1 and status = 'pending'`, [eventId]);
+    await query(`delete from event_matches where event_id = $1`, [eventId]);
+    await query(`insert into event_matches (event_id, participant_id, candidate_id, rank, score, computation_version)
+                 values ($1, $2, $3, 1, 50, 't'), ($1, $4, $5, 1, 50, 't')`, [eventId, ids.ann, ids.bo, ids.dee, ids.ann]);
+
+    expect(await matchingJobs.enqueueRefreshes(eventId, ids.bo, { delaySeconds: 60, fullList: 1 })).toBe(2);
+    await matchingJobs.enqueueRefreshes(eventId, ids.bo, { delaySeconds: 60, fullList: 1 });
+    const pending = (await query<{ participant_id: string; trigger_kind: string }>(
+      `select participant_id, trigger_kind from matching_jobs where event_id = $1 and status = 'pending'`, [eventId])).rows;
+    expect(pending.map((row) => row.participant_id).sort()).toEqual([ids.ann, ids.cy].sort());
+    expect(pending.every((row) => row.trigger_kind === "refresh")).toBe(true);
+  });
+
+  it("keeps a pending profile job a profile job when a refresh joins it", async () => {
+    await save("ann", "Ann edits again");
+    await matchingJobs.enqueue(eventId, ids.ann, "embed", { trigger: "refresh" });
+    expect((await query<{ trigger_kind: string }>(`select trigger_kind from matching_jobs where event_id = $1 and participant_id = $2 and job_type = 'embed' and status = 'pending'`,
+      [eventId, ids.ann])).rows[0].trigger_kind).toBe("profile");
+  });
+
   it("fails a crashed job that was already on its last attempt", async () => {
     await query(`update matching_jobs set available_at = now() where event_id = $1 and status = 'pending'`, [eventId]);
     const job = await matchingJobs.claim("embed", eventId);

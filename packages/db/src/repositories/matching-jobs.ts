@@ -109,6 +109,29 @@ export async function complete(id: number): Promise<void> {
   await query(`update matching_jobs set status = 'done', lease_until = null where id = $1`, [id]);
 }
 
+/**
+ * After someone's own profile change is processed, queues refreshes for the
+ * people it affects: those whose saved matches include them, and those whose
+ * list is not full (the person may now belong in it). Refreshes are delayed so
+ * a burst of changes coalesces into one run per person, and they never ask
+ * for further refreshes. Returns how many people were queued.
+ */
+export async function enqueueRefreshes(eventId: string, changedId: string, options: { delaySeconds: number; fullList: number }): Promise<number> {
+  const { rowCount } = await query(
+    `insert into matching_jobs (event_id, participant_id, job_type, revision, trigger_kind, available_at)
+     select $1, p.attendee_id, 'match', p.profile_revision, 'refresh', now() + make_interval(secs => $3)
+       from event_participants p
+      where p.event_id = $1 and p.attendee_id <> $2 and p.profile_updated_at is not null and p.revoked_at is null
+        and (exists (select 1 from event_matches m where m.event_id = $1 and m.participant_id = p.attendee_id and m.candidate_id = $2)
+             or (select count(*) from event_matches m where m.event_id = $1 and m.participant_id = p.attendee_id) < $4)
+     on conflict (event_id, participant_id, job_type) where status = 'pending' do update
+       set revision = greatest(matching_jobs.revision, excluded.revision),
+           available_at = least(matching_jobs.available_at, excluded.available_at)`,
+    [eventId, changedId, options.delaySeconds, options.fullList]
+  );
+  return rowCount ?? 0;
+}
+
 /** Delay before retry `attempt` (1-based): 30s, 60s, 120s, ... capped at 15 minutes. */
 export function retryDelaySeconds(attempt: number): number {
   return Math.min(30 * 2 ** Math.max(0, attempt - 1), 15 * 60);

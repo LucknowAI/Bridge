@@ -110,6 +110,8 @@ The first command imports the global attendee directory so the organizer account
 | `npm run keycloak:sync` | Bring an existing realm up to date: client secret, Google credentials, the account-linking flow (Google joins an account an e-mail code created), and the site login theme. Run after the first Keycloak start and after upgrades |
 | `npm run account:disable -- <email>` | Block sign-in and end every session (database and Keycloak); `account:enable` undoes it |
 | `npm run account:revoke-sessions -- <email>` | Sign the person out everywhere without disabling the account |
+| `npm run jobs:failed` | List background matching jobs that failed after every retry, with their last error |
+| `npm run jobs:retry -- <id\|all>` | Queue failed jobs again with fresh attempts |
 | `npm run account:erase -- <email> --yes` | Deletion request: delete the person, their event profiles, matches, introductions, cached explanations and Keycloak user (recorded in the audit log) |
 | `npm run docker:up` | Build images and start the local Compose stack |
 

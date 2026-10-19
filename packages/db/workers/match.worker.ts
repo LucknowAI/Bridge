@@ -3,6 +3,10 @@ import { getContainer } from "../../../apps/web/src/composition/container";
 import { computeMatches } from "../../../apps/web/src/application/use-cases/compute-matches";
 import { StaleRevisionError } from "../../../apps/web/src/domain/matching/pipeline";
 import { eventAllows } from "../../../apps/web/src/domain/shared/event-lifecycle";
+import { DEFAULT_MATCH_LIMIT } from "../../../apps/web/src/domain/matching/match-strategy";
+
+/** Seconds to wait before refreshing affected people, so bursts coalesce. */
+const REFRESH_DELAY_SECONDS = Number(process.env.MATCH_REFRESH_DELAY_SECONDS ?? 120);
 
 export async function processMatchJob(): Promise<boolean> {
   const job = await matchingJobs.claim("match");
@@ -17,6 +21,13 @@ export async function processMatchJob(): Promise<boolean> {
     const { pipeline } = getContainer();
     await computeMatches({ eventId: job.event_id, participantId: job.participant_id, expectedRevision: job.revision }, pipeline);
     await matchingJobs.complete(job.id);
+    if (job.trigger_kind === "profile") {
+      const queued = await matchingJobs.enqueueRefreshes(job.event_id, job.participant_id, {
+        delaySeconds: Number.isFinite(REFRESH_DELAY_SECONDS) ? REFRESH_DELAY_SECONDS : 120,
+        fullList: DEFAULT_MATCH_LIMIT,
+      });
+      if (queued) console.info(`[worker:match] job ${job.id}: refreshing ${queued} affected participant(s)`);
+    }
   } catch (error) {
     if (error instanceof StaleRevisionError) {
       // The profile moved on during this run; the newer job publishes instead.
