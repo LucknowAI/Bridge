@@ -1,6 +1,7 @@
 import { query } from "../client";
 import { deleteExpired as deleteExpiredChallenges } from "./login-challenges";
 import { AUDIT_RETENTION_DAYS } from "./audit";
+import { USAGE_RETENTION_DAYS } from "./model-usage";
 
 /** How long a dead row is kept before the sweep removes it. */
 export const RETENTION = {
@@ -28,6 +29,7 @@ export async function sweepExpired(): Promise<SweepResult> {
   const cache = await query(`delete from retrieval_cache where expires_at < now()`);
   const explanations = await query(`delete from pair_explanations where expires_at < now()`);
   await query(`delete from cache_locks where expires_at < now()`);
+  await query(`delete from model_usage where created_at < now() - make_interval(days => $1)`, [USAGE_RETENTION_DAYS]);
   const audits = await query(`delete from audit_events where created_at < now() - make_interval(days => $1)`, [AUDIT_RETENTION_DAYS]);
   return {
     loginChallenges, rateLimitBuckets: buckets.rowCount ?? 0, retrievalCache: cache.rowCount ?? 0,

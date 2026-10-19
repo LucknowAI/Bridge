@@ -40,6 +40,10 @@ export interface MatchingInput {
  */
 export const MATCHING_PIPELINE_VERSION = `v2.${SCORING_CONFIG.version}`;
 
+/** Total time a search may spend on model calls; rerank is skipped if too little is left. */
+export const SEARCH_BUDGET_MS = 6_000;
+const QUERY_EMBED_BUDGET_MS = 2_500;
+
 /** The profile changed while matching ran; the newer job will publish instead. */
 export class StaleRevisionError extends Error {
   constructor() {
@@ -118,7 +122,7 @@ export class MatchingPipeline {
    * Both feed the score, so the same query ranks differently per person.
    */
   /** Query embeddings are shared across replicas and searches for a day. */
-  private embedQuery(query: string): Promise<number[] | null> {
+  private embedQuery(query: string, timeoutMs: number): Promise<number[] | null> {
     const normalized = query.trim().toLowerCase().replace(/\s+/g, " ");
     const key = createHash("sha256").update(JSON.stringify(["query-embedding", this.embeddings.id, normalized])).digest("hex");
     return computeOnce<number[] | null>({
@@ -126,15 +130,16 @@ export class MatchingPipeline {
       key,
       read: () => this.cache.getVector(key),
       write: (vector) => vector ? this.cache.setVector(key, vector, 24 * 60 * 60) : Promise.resolve(),
-      compute: () => this.embeddings.embed(normalized, "query"),
+      compute: () => this.embeddings.embed(normalized, "query", { timeoutMs }),
       shouldStore: (vector) => vector !== null,
     });
   }
 
   private async search(input: MatchingInput, viewer: ParticipantProfile) {
     const query = input.query!.trim();
+    const deadline = Date.now() + SEARCH_BUDGET_MS;
     const terms = queryTerms(query);
-    const queryEmbedding = await this.embedQuery(query);
+    const queryEmbedding = await this.embedQuery(query, Math.min(QUERY_EMBED_BUDGET_MS, deadline - Date.now()));
     const retrieved = await this.retrieve.execute({
       eventId: input.eventId,
       viewerId: input.participantId,
@@ -155,7 +160,7 @@ export class MatchingPipeline {
       };
     }).sort((a, b) => b.score - a.score);
     const top = this.topK.execute(scored, input.limit ?? 12);
-    const { candidates: ranked } = await this.rerank.execute(viewer, top, queryContext(query));
+    const { candidates: ranked } = await this.rerank.execute(viewer, top, queryContext(query), { timeoutMs: deadline - Date.now() });
     return ranked;
   }
 }

@@ -16,13 +16,16 @@ export interface RerankResult {
  * the model is not called and the scored order stands. A cached reason never
  * decides the order of a shortlist.
  */
+/** Below this much remaining time a rerank call is not worth starting. */
+const MIN_RERANK_MS = 750;
+
 export class LlmRerankStage {
   constructor(
     private readonly provider: LlmProvider | null,
     private readonly cache: ExplanationCache | null = null
   ) {}
 
-  async execute(viewer: ParticipantProfile, candidates: MatchCandidate[], context = "profile"): Promise<RerankResult> {
+  async execute(viewer: ParticipantProfile, candidates: MatchCandidate[], context = "profile", options: { timeoutMs?: number } = {}): Promise<RerankResult> {
     const scored = { candidates: candidates.map(addFallbackReason), rankedBy: "score" };
     if (!this.provider || candidates.length === 0) return scored;
     const provider = this.provider;
@@ -34,9 +37,13 @@ export class LlmRerankStage {
     const cached = await this.readCache(keys);
     const withCached = candidates.map((candidate, index) => ({ ...candidate, reason: cached.get(keys[index]) ?? candidate.reason }));
     if (cached.size === candidates.length) return { candidates: withCached, rankedBy: "score" };
+    // Too little of the request's budget left for a model call: keep the scored order.
+    if (options.timeoutMs !== undefined && options.timeoutMs < MIN_RERANK_MS) {
+      return { candidates: withCached.map(addFallbackReason), rankedBy: "score" };
+    }
 
     try {
-      const reranked = await provider.rerank(viewer, candidates);
+      const reranked = await provider.rerank(viewer, candidates, { timeoutMs: options.timeoutMs });
       await this.writeCache(viewer, reranked.filter((candidate) => candidate.reason).map((candidate) => ({
         key: keyFor(candidate), candidateId: candidate.participant.attendeeId, reason: candidate.reason!,
       })));
