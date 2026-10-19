@@ -146,6 +146,17 @@ data "aws_iam_policy_document" "github_deploy" {
     resources = ["*"]
   }
 
+  # Promotion copies another stack's tested images (e.g. staging's) here
+  # unchanged, so this role may read that stack's repositories.
+  dynamic "statement" {
+    for_each = var.image_promotion_source != "" ? [var.image_promotion_source] : []
+    content {
+      sid       = "EcrPromoteFrom"
+      actions   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability", "ecr:DescribeImages"]
+      resources = ["arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${statement.value}/*"]
+    }
+  }
+
   statement {
     sid = "EcrPush"
     actions = [

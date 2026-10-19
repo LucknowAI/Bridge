@@ -316,3 +316,9 @@ variable "session_secret_active" {
     error_message = "session_secret_active must be \"a\" or \"b\"."
   }
 }
+
+variable "image_promotion_source" {
+  description = "Stack whose images production may promote unchanged, e.g. \"match-maker-staging\" (same account and region). Empty disables promotion."
+  type        = string
+  default     = ""
+}

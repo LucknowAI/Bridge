@@ -68,6 +68,8 @@ infra/terraform/*.tfstate
 infra/terraform/*.tfstate.*
 infra/terraform/*.tfvars
 !infra/terraform/*.tfvars.example
+infra/terraform/environments/*.tfvars
+!infra/terraform/environments/*.tfvars.example
 infra/terraform/*.tfplan
 infra/terraform/.terraform.lock.hcl
 infra/terraform/override.tf

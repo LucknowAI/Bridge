@@ -1,0 +1,54 @@
+# Staging: a separate stack (match-maker-staging-*) with its own state, in the
+# same AWS account and region as production so tested images can be promoted
+# unchanged. Copy to staging.tfvars (gitignored) and run, from infra/terraform:
+#
+#   terraform init -reconfigure -backend-config="bucket=<state bucket>" \
+#     -backend-config="key=match-maker/staging/terraform.tfstate" -backend-config="region=ap-south-1"
+#   terraform apply -var-file=environments/staging.tfvars
+#
+# Switch back to production with the same init and key=match-maker/terraform.tfstate.
+
+aws_region         = "ap-south-1"
+project_name       = "match-maker"
+environment        = "staging"
+default_event_slug = "demo"
+
+# Staging may be HTTP-only for a first evaluation; give it its own hostname
+# and certificate to rehearse the production login flow (Google needs HTTPS).
+domain_name          = ""
+keycloak_domain_name = ""
+acm_certificate_arn  = ""
+route53_zone_id      = ""
+keycloak_admin_cidrs = []
+
+# Production's stack creates the account's GitHub OIDC provider; reuse it.
+github_repository        = "LucknowAI/Bridge"
+github_oidc_provider_arn = "arn:aws:iam::<account id>:oidc-provider/token.actions.githubusercontent.com"
+
+# Small but production-shaped: two web tasks so rolling deploys and the
+# shared caches behave as in production.
+web_desired_count     = 2
+web_min_capacity      = 2
+web_max_capacity      = 4
+worker_desired_count  = 1
+keycloak_min_capacity = 1
+keycloak_max_capacity = 2
+
+db_instance_class        = "db.t4g.micro"
+db_multi_az              = false
+db_backup_retention_days = 3
+db_deletion_protection   = false
+
+enable_nat_gateway = true
+
+# Staging gets its own provider keys, so its usage and quota never touch
+# production's. Fill them into Secrets Manager after the first apply.
+gemini_api_key           = ""
+upstash_redis_rest_url   = ""
+upstash_redis_rest_token = ""
+resend_api_key           = ""
+google_client_id         = ""
+google_client_secret     = ""
+
+email_from  = "Mr. Bridge staging <login@example.com>"
+alarm_email = ""
