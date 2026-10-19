@@ -162,6 +162,7 @@ data "aws_iam_policy_document" "github_deploy" {
       aws_ecr_repository.web.arn,
       aws_ecr_repository.keycloak.arn,
       aws_ecr_repository.migrate.arn,
+      aws_ecr_repository.worker.arn,
     ]
   }
 
