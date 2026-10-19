@@ -46,6 +46,7 @@ export class RetrieveStage {
           eventId: input.eventId,
           excludeAttendeeId: null,
           embedding: input.embedding,
+          embeddingModel: input.embeddingSpace,
           terms: input.terms,
           filters,
           limit,
@@ -62,6 +63,7 @@ export class RetrieveStage {
       eventId: input.eventId,
       excludeAttendeeId: input.viewerId,
       embedding: input.embedding,
+      embeddingModel: input.embeddingSpace,
       limit,
     });
   }

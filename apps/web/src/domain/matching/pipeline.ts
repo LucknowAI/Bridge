@@ -94,16 +94,19 @@ export class MatchingPipeline {
 
     if (input.mode === "search") return this.search(input, storedProfile);
 
-    const embedding = storedProfile.embedding ?? await this.embeddings.embed(profileText(storedProfile), "profile");
-    if (embedding && !storedProfile.embedding) {
-      await this.participants.setEmbedding(input.eventId, input.participantId, embedding);
+    // A vector from another model is a different space: embed again with the current one.
+    const current = storedProfile.embeddingModel === this.embeddings.id ? storedProfile.embedding ?? null : null;
+    const embedding = current ?? await this.embeddings.embed(profileText(storedProfile), "profile");
+    if (embedding && !current) {
+      await this.participants.setEmbedding(input.eventId, input.participantId, embedding, this.embeddings.id);
     }
-    const viewer = { ...storedProfile, embedding: embedding ?? storedProfile.embedding };
+    const viewer = { ...storedProfile, embedding, embeddingModel: embedding ? this.embeddings.id : null };
 
     const retrieved = await this.retrieve.execute({
       eventId: input.eventId,
       viewerId: input.participantId,
       embedding,
+      embeddingSpace: this.embeddings.id,
       limit: 50,
     });
     const compatible = this.filter.execute(viewer, retrieved);
@@ -152,7 +155,7 @@ export class MatchingPipeline {
     });
     const compatible = this.filter.execute(viewer, retrieved);
     const scored = this.score.execute(viewer, compatible).map((candidate) => {
-      const relevance = queryRelevance(terms, queryEmbedding, candidate.participant);
+      const relevance = queryRelevance(terms, queryEmbedding, candidate.participant, this.embeddings.id);
       return {
         ...candidate,
         score: searchScore(relevance, candidate.score),

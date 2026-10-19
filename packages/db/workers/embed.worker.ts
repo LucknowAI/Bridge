@@ -21,7 +21,7 @@ export async function processEmbedJob(): Promise<boolean> {
       return true;
     }
     const embedding = await container.embeddings.embed(profileText(profile), "profile");
-    if (embedding && !(await container.participants.setEmbeddingAt(job.event_id, job.participant_id, embedding, job.revision))) {
+    if (embedding && !(await container.participants.setEmbeddingAt(job.event_id, job.participant_id, embedding, job.revision, container.embeddings.id))) {
       await matchingJobs.complete(job.id);
       return true;
     }

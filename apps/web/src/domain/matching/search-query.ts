@@ -62,8 +62,9 @@ export function lexicalRelevance(terms: string[], profile: ParticipantProfile): 
 }
 
 /** How well a candidate answers the query: semantic when both vectors exist, otherwise lexical. */
-export function queryRelevance(terms: string[], queryEmbedding: number[] | null, profile: ParticipantProfile): number {
-  const semantic = cosineSimilarity(queryEmbedding, profile.embedding);
+export function queryRelevance(terms: string[], queryEmbedding: number[] | null, profile: ParticipantProfile, queryModel?: string): number {
+  const comparable = queryModel === undefined || profile.embeddingModel === undefined || profile.embeddingModel === queryModel;
+  const semantic = comparable ? cosineSimilarity(queryEmbedding, profile.embedding) : 0;
   return semantic > 0 ? semantic : lexicalRelevance(terms, profile);
 }
 

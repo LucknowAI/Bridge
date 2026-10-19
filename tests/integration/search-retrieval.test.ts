@@ -68,6 +68,18 @@ describeDb("search retrieval", () => {
     expect((await names({ eventId, excludeAttendeeId: null, filters: { intent: null, domain: "AI" } })).sort()).toEqual(["Ben Iyer", "Cy Das"]);
   });
 
+  it("ranks by vector only among candidates embedded by the query's model", async () => {
+    const unit = (index: number) => Array.from({ length: 768 }, (_, i) => (i === index ? 1 : 0));
+    // Ana's vector matches the query exactly but comes from another model; Ben's is close and from the same one.
+    await query(`update event_participants set embedding = $3::vector, embedding_model = 'other-model' where event_id = $1 and attendee_id = $2`,
+      [eventId, ids.designer, `[${unit(0).join(",")}]`]);
+    await query(`update event_participants set embedding = $3::vector, embedding_model = 'query-model' where event_id = $1 and attendee_id = $2`,
+      [eventId, ids.engineer, `[${unit(0).map((v, i) => (i === 1 ? 0.5 : v)).join(",")}]`]);
+    const ranked = await names({ eventId, excludeAttendeeId: null, embedding: unit(0), embeddingModel: "query-model" });
+    expect(ranked[0]).toBe("Ben Iyer");
+    expect(ranked).toContain("Ana Rao");
+  });
+
   it("lists each domain present once", async () => {
     expect(await repo.listDomains(eventId)).toEqual(["AI", "Design"]);
   });

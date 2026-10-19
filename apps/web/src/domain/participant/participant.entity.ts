@@ -26,6 +26,8 @@ export interface ParticipantProfile {
   /** Version of the event's profile form this profile was saved under. */
   formVersion?: number;
   embedding?: number[] | null;
+  /** The provider/model that produced `embedding`; vectors are only compared within one model. */
+  embeddingModel?: string | null;
 }
 
 export type ParticipantProfileInput = Pick<

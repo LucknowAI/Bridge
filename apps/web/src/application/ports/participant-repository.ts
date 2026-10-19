@@ -12,6 +12,8 @@ export interface ParticipantRepository {
     /** Without an embedding, only candidates matching one of these words, best first. */
     terms?: string[];
     filters?: SearchFilters;
+    /** The model behind `embedding`; vectors from other models are not ranked against it. */
+    embeddingModel?: string | null;
     limit?: number;
   }): Promise<ParticipantProfile[]>;
   /** Changes whenever the event's participants change; part of retrieval cache keys. */
@@ -19,9 +21,9 @@ export interface ParticipantRepository {
   /** Domains present among eligible participants, for the search filter. */
   listDomains(eventId: string): Promise<string[]>;
   findCandidatesByIds(eventId: string, ids: string[]): Promise<ParticipantProfile[]>;
-  setEmbedding(eventId: string, attendeeId: string, embedding: number[]): Promise<void>;
+  setEmbedding(eventId: string, attendeeId: string, embedding: number[], model: string): Promise<void>;
   /** Writes the embedding only while the profile is still at `revision`; false when it moved on. */
-  setEmbeddingAt(eventId: string, attendeeId: string, embedding: number[], revision: number): Promise<boolean>;
+  setEmbeddingAt(eventId: string, attendeeId: string, embedding: number[], revision: number, model: string): Promise<boolean>;
   shareVenueZone(eventId: string, attendeeId: string, zone: string): Promise<void>;
   hasEventAccess(eventId: string, attendeeId: string): Promise<boolean>;
 }
