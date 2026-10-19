@@ -1,6 +1,7 @@
 import { outbox, query, transaction } from "@match-maker/db";
 import type { IntroRepository } from "../../application/ports/intro-repository";
 import type { IntroRequest, IntroStatus } from "../../domain/connection/intro-request.entity";
+import { introRequestRefusal } from "../../domain/connection/connection.rules";
 
 interface IntroRow {
   id: string;
@@ -22,6 +23,17 @@ export class PostgresIntroRepository implements IntroRepository {
     const message = input.message?.trim().slice(0, 500) || null;
     // The request and its notification commit together, so neither is lost.
     const created = await transaction(async (client) => {
+      // One lock per pair of people, in either direction, so two requests
+      // crossing at the same moment cannot both pass the check below.
+      const [first, second] = [input.requesterId, input.recipientId].sort();
+      await client.query(`select pg_advisory_xact_lock(hashtext('intro:' || $1 || ':' || $2 || ':' || $3))`, [input.eventId, first, second]);
+      const { rows: existing } = await client.query<IntroRow>(
+        `select ${INTRO_COLUMNS} from intro_requests
+          where event_id = $1 and ((requester_id = $2 and recipient_id = $3) or (requester_id = $3 and recipient_id = $2))`,
+        [input.eventId, input.requesterId, input.recipientId]
+      );
+      const refusal = introRequestRefusal(input.requesterId, existing.map(mapIntro));
+      if (refusal) throw new Error(refusal);
       const { rows } = await client.query<IntroRow>(
         `insert into intro_requests (event_id, requester_id, recipient_id, message)
          values ($1, $2, $3, $4)
