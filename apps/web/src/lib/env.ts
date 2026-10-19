@@ -27,7 +27,7 @@ const POSITIVE_INTEGERS = [
 
 const ALLOWED: Record<string, string[]> = {
   DATABASE_SSL: ["disable", "require", "verify"],
-  EMBEDDING_PROVIDER: ["gemini", "local"],
+  EMBEDDING_PROVIDER: ["gemini", "local", "hash"],
   EMAIL_DEV_FALLBACK: ["true", "false"],
   TRUSTED_PROXY_HOPS: ["0", "1", "2", "3"],
 };
@@ -66,6 +66,9 @@ export function checkEnv(role: EnvRole, env: Env = process.env): string[] {
   // Production must not quietly fall back to unverified or plain transport.
   // Local hosts are exempt so the docker-compose stack still runs as production.
   if (value("NODE_ENV") === "production") {
+    if (value("EMBEDDING_PROVIDER") === "hash") {
+      problems.push("EMBEDDING_PROVIDER=hash is for capacity tests only and cannot run in production.");
+    }
     if (databaseUrl && !isLocalHost(databaseUrl)) {
       if (value("DATABASE_SSL") !== "verify") {
         problems.push("DATABASE_SSL must be verify in production, so the database certificate is checked.");

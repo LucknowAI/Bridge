@@ -36,7 +36,8 @@
     "account:erase": "tsx tools/manage-account.ts erase",
     "jobs:failed": "tsx tools/manage-jobs.ts failed",
     "jobs:retry": "tsx tools/manage-jobs.ts retry",
-    "models:usage": "tsx tools/model-usage.ts"
+    "models:usage": "tsx tools/model-usage.ts",
+    "capacity:check": "tsx tools/capacity-check.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
