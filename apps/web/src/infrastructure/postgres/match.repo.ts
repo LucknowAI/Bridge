@@ -30,8 +30,11 @@ export class PostgresMatchRepository implements MatchRepository {
     return transaction(async (client) => {
       if (expectedRevision !== undefined) {
         // Lock the profile row so a save cannot slip in between check and write.
+        // NO KEY UPDATE still blocks a profile save, but not the key-share locks
+        // other people's match inserts take on this row through their foreign
+        // keys; FOR UPDATE made two lists naming each other deadlock.
         const { rows } = await client.query<{ profile_revision: string }>(
-          `select profile_revision from event_participants where event_id = $1 and attendee_id = $2 for update`, [eventId, participantId]);
+          `select profile_revision from event_participants where event_id = $1 and attendee_id = $2 for no key update`, [eventId, participantId]);
         if (!rows[0] || Number(rows[0].profile_revision) !== expectedRevision) return false;
       }
       await client.query(`delete from event_matches where event_id = $1 and participant_id = $2`, [eventId, participantId]);
