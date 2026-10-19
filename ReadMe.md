@@ -4,7 +4,7 @@ Mr. Bridge is a multi event networking and matchmaking app. Organizers create ev
 
 The implementation follows the architecture described in [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md). The [end-to-end flow](docs/END_TO_END_FLOW.md) and [matching pipeline](docs/BRIDGE_ENGINE_PIPELINE.md) docs show the product journeys.
 
-See the [production roadmap](docs/PRODUCTION_ROADMAP.md) for authentication findings, the invited-account signup policy, Google setup, and remaining work ordered by implementation effort.
+See the [production roadmap](docs/PRODUCTION_ROADMAP.md) for authentication findings, the invited-account signup policy, Google setup, and remaining work ordered by implementation effort. The [operations runbook](docs/OPERATIONS.md) covers releases, staging, rollback, alarms, database restore, secret rotation and the launch checklist.
 
 ## Architecture
 
@@ -105,6 +105,8 @@ The first command imports the global attendee directory so the organizer account
 | `npm test` | Run unit and integration suites. Integration suites skip without Postgres/Keycloak; set `REQUIRE_SERVICES=db,keycloak` to fail instead (CI does, and `tools/check-test-report.ts` fails on any skipped test). Stop a locally running worker first, or it claims the pipeline test's jobs |
 | `npm run test:e2e` | Browser acceptance suite (Playwright) against a running app and worker started with `EMAIL_DEV_FALLBACK=true`; set `E2E_BASE_URL` and `E2E_WEB_LOG` (the app's output, where login codes are read) |
 | `npm run db:migrate` | Apply pending PostgreSQL migrations |
+| `npm run capacity:check` | Measure matching throughput, search latency and model calls for an event size against the budgets in the runbook |
+| `npm run db:verify` / `db:restore-rehearsal` | Check a database (or a restored copy) is usable; rehearse dump and restore locally |
 | `npm run db:seed` | Upsert demo roster, organization, event, and organizer |
 | `npm run db:import -- <file> [event-slug]` | Import attendee rows and optionally attach them to an event |
 | `npm run keycloak:wait` | Wait for the configured Keycloak realm to respond |

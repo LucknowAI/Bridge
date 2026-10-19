@@ -15,6 +15,8 @@ COPY apps/web/src apps/web/src
 COPY packages/db packages/db
 COPY packages/auth packages/auth
 COPY packages/email packages/email
+# Operator tools (account:*, keycloak:sync) run as one-off tasks from this image.
+COPY tools tools
 
 # Amazon's RDS CA bundle, so DATABASE_SSL=verify can check the database
 # certificate (DATABASE_CA_CERT_FILE points here in the task definitions).
