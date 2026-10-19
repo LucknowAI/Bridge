@@ -2,6 +2,8 @@ import type { EmbeddingProvider } from "../../application/ports/embedding-provid
 
 /** Adapter for an internal sentence-transformers inference endpoint. */
 export class LocalBgeProvider implements EmbeddingProvider {
+  readonly id = "local-bge:768";
+
   async embed(text: string): Promise<number[] | null> {
     const endpoint = process.env.LOCAL_BGE_URL;
     if (!endpoint) return null;

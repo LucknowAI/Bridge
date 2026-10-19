@@ -27,6 +27,7 @@ export async function sweepExpired(): Promise<SweepResult> {
   );
   const cache = await query(`delete from retrieval_cache where expires_at < now()`);
   const explanations = await query(`delete from pair_explanations where expires_at < now()`);
+  await query(`delete from cache_locks where expires_at < now()`);
   const audits = await query(`delete from audit_events where created_at < now() - make_interval(days => $1)`, [AUDIT_RETENTION_DAYS]);
   return {
     loginChallenges, rateLimitBuckets: buckets.rowCount ?? 0, retrievalCache: cache.rowCount ?? 0,

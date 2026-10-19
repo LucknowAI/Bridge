@@ -3,6 +3,8 @@ import type { EmbeddingProvider } from "../../application/ports/embedding-provid
 const DIMENSIONS = 768;
 
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
+  readonly id = `gemini:gemini-embedding-001:${DIMENSIONS}`;
+
   async embed(text: string, task: "profile" | "query"): Promise<number[] | null> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || !text.trim()) return null;

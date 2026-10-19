@@ -2,6 +2,8 @@ import type { EmbeddingProvider } from "../../application/ports/embedding-provid
 import type { CandidateCache } from "../../application/ports/candidate-cache";
 import type { ExplanationCache } from "../../application/ports/explanation-cache";
 import { queryContext } from "./explanation-key";
+import { computeOnce } from "../../application/shared-computation";
+import { createHash } from "node:crypto";
 import type { LlmProvider } from "../../application/ports/llm-provider";
 import type { MatchRepository } from "../../application/ports/match-repository";
 import type { ParticipantRepository } from "../../application/ports/participant-repository";
@@ -62,7 +64,7 @@ export class MatchingPipeline {
     matches: MatchRepository,
     private readonly embeddings: EmbeddingProvider,
     llm: LlmProvider | null,
-    cache: CandidateCache,
+    private readonly cache: CandidateCache,
     explanations: ExplanationCache | null = null
   ) {
     this.retrieve = new RetrieveStage(participants, cache);
@@ -104,10 +106,24 @@ export class MatchingPipeline {
    * and measures relevance; the searcher's own profile measures compatibility.
    * Both feed the score, so the same query ranks differently per person.
    */
+  /** Query embeddings are shared across replicas and searches for a day. */
+  private embedQuery(query: string): Promise<number[] | null> {
+    const normalized = query.trim().toLowerCase().replace(/\s+/g, " ");
+    const key = createHash("sha256").update(JSON.stringify(["query-embedding", this.embeddings.id, normalized])).digest("hex");
+    return computeOnce<number[] | null>({
+      cache: this.cache,
+      key,
+      read: () => this.cache.getVector(key),
+      write: (vector) => vector ? this.cache.setVector(key, vector, 24 * 60 * 60) : Promise.resolve(),
+      compute: () => this.embeddings.embed(normalized, "query"),
+      shouldStore: (vector) => vector !== null,
+    });
+  }
+
   private async search(input: MatchingInput, viewer: ParticipantProfile) {
     const query = input.query!.trim();
     const terms = queryTerms(query);
-    const queryEmbedding = await this.embeddings.embed(query, "query");
+    const queryEmbedding = await this.embedQuery(query);
     const retrieved = await this.retrieve.execute({
       eventId: input.eventId,
       viewerId: input.participantId,
@@ -115,6 +131,7 @@ export class MatchingPipeline {
       query,
       terms,
       filters: input.filters ?? NO_FILTERS,
+      embeddingSpace: this.embeddings.id,
       limit: 50,
     });
     const compatible = this.filter.execute(viewer, retrieved);

@@ -13,6 +13,8 @@ export interface ParticipantRepository {
     filters?: SearchFilters;
     limit?: number;
   }): Promise<ParticipantProfile[]>;
+  /** Changes whenever the event's participants change; part of retrieval cache keys. */
+  corpusRevision(eventId: string): Promise<number>;
   /** Domains present among eligible participants, for the search filter. */
   listDomains(eventId: string): Promise<string[]>;
   findCandidatesByIds(eventId: string, ids: string[]): Promise<ParticipantProfile[]>;

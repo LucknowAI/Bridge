@@ -108,6 +108,11 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     return rows.map(mapProfile);
   }
 
+  async corpusRevision(eventId: string): Promise<number> {
+    const { rows } = await query<{ corpus_revision: string }>(`select corpus_revision from events where id = $1`, [eventId]);
+    return Number(rows[0]?.corpus_revision ?? 0);
+  }
+
   async listDomains(eventId: string): Promise<string[]> {
     const { rows } = await query<{ domain: string }>(
       // One entry per domain ignoring case, preferring a capitalised spelling.
