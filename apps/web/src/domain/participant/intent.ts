@@ -23,6 +23,15 @@ export const INTENT_COMPATIBILITY: Record<Intent, Intent[]> = {
   [Intent.INVESTING]: [Intent.RAISING_FUNDING, Intent.NETWORKING],
 };
 
+/**
+ * The intents a person welcomes, for narrowing retrieval before any top-K
+ * cut; null when they welcome everyone.
+ */
+export function welcomedIntents(intent: Intent): Intent[] | null {
+  const welcomed = INTENT_COMPATIBILITY[intent] ?? [];
+  return welcomed.length === Object.values(Intent).length ? null : [...welcomed].sort();
+}
+
 export function isIntentCompatible(from: Intent, to: Intent): boolean {
   return INTENT_COMPATIBILITY[from]?.includes(to) ?? false;
 }

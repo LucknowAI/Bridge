@@ -7,7 +7,7 @@ import { matchesFilters, NO_FILTERS, type SearchFilters } from "../search-query"
 import { computeOnce } from "../../../application/shared-computation";
 
 /** Bump when retrieval semantics change, so cached candidate lists are not reused. */
-const RETRIEVAL_VERSION = "r2";
+const RETRIEVAL_VERSION = "r3";
 
 export class RetrieveStage {
   constructor(
@@ -24,6 +24,12 @@ export class RetrieveStage {
     filters?: SearchFilters;
     /** Embedding provider/model; vectors from different spaces must not share entries. */
     embeddingSpace?: string;
+    /**
+     * The viewer's welcomed intents, applied before the limit: filtering
+     * afterwards left people with no matches when their nearest neighbours
+     * all had intents they do not welcome.
+     */
+    welcomedIntents?: string[] | null;
     limit?: number;
   }): Promise<ParticipantProfile[]> {
     const limit = input.limit ?? 50;
@@ -34,7 +40,7 @@ export class RetrieveStage {
       // retrieval kind; the ranking that follows is still personal.
       const corpus = await this.participants.corpusRevision(input.eventId);
       const key = createHash("sha256").update(JSON.stringify([
-        RETRIEVAL_VERSION, input.eventId, corpus, normalizedQuery, filters.intent, filters.domain?.toLowerCase() ?? null,
+        RETRIEVAL_VERSION, input.eventId, corpus, normalizedQuery, filters.intent, filters.domain?.toLowerCase() ?? null, input.welcomedIntents ?? null,
         input.embedding ? input.embeddingSpace ?? "semantic" : "lexical", limit,
       ])).digest("hex");
       const ids = await computeOnce({
@@ -49,6 +55,7 @@ export class RetrieveStage {
           embeddingModel: input.embeddingSpace,
           terms: input.terms,
           filters,
+          welcomedIntents: input.welcomedIntents,
           limit,
         })).map((candidate) => candidate.attendeeId),
       });
@@ -64,6 +71,7 @@ export class RetrieveStage {
       excludeAttendeeId: input.viewerId,
       embedding: input.embedding,
       embeddingModel: input.embeddingSpace,
+      welcomedIntents: input.welcomedIntents,
       limit,
     });
   }

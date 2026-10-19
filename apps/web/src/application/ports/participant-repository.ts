@@ -12,6 +12,8 @@ export interface ParticipantRepository {
     /** Without an embedding, only candidates matching one of these words, best first. */
     terms?: string[];
     filters?: SearchFilters;
+    /** Only people with one of these intents (the viewer's welcomed intents); null for all. */
+    welcomedIntents?: string[] | null;
     /** The model behind `embedding`; vectors from other models are not ranked against it. */
     embeddingModel?: string | null;
     limit?: number;

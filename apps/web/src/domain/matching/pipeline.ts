@@ -1,4 +1,5 @@
 import type { EmbeddingProvider } from "../../application/ports/embedding-provider";
+import { welcomedIntents } from "../participant/intent";
 import type { CandidateCache } from "../../application/ports/candidate-cache";
 import type { ExplanationCache } from "../../application/ports/explanation-cache";
 import { queryContext } from "./explanation-key";
@@ -107,6 +108,7 @@ export class MatchingPipeline {
       viewerId: input.participantId,
       embedding,
       embeddingSpace: this.embeddings.id,
+      welcomedIntents: welcomedIntents(viewer.intent),
       limit: 50,
     });
     const compatible = this.filter.execute(viewer, retrieved);
@@ -151,6 +153,7 @@ export class MatchingPipeline {
       terms,
       filters: input.filters ?? NO_FILTERS,
       embeddingSpace: this.embeddings.id,
+      welcomedIntents: welcomedIntents(viewer.intent),
       limit: 50,
     });
     const compatible = this.filter.execute(viewer, retrieved);
