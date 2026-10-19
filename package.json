@@ -34,7 +34,8 @@
     "account:revoke-sessions": "tsx tools/manage-account.ts revoke-sessions",
     "account:erase": "tsx tools/manage-account.ts erase",
     "jobs:failed": "tsx tools/manage-jobs.ts failed",
-    "jobs:retry": "tsx tools/manage-jobs.ts retry"
+    "jobs:retry": "tsx tools/manage-jobs.ts retry",
+    "models:usage": "tsx tools/model-usage.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
