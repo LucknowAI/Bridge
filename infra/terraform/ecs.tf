@@ -211,6 +211,7 @@ resource "aws_ecs_task_definition" "web" {
       environment = [
         { name = "NODE_ENV", value = "production" },
         { name = "PORT", value = "3000" },
+        { name = "METRICS_NAMESPACE", value = local.metrics_namespace },
         { name = "APP_BASE_URL", value = local.app_base_url },
         { name = "DEFAULT_EVENT_SLUG", value = var.default_event_slug },
         # One ALB appends the client address to X-Forwarded-For.
@@ -479,6 +480,7 @@ resource "aws_ecs_task_definition" "worker" {
       essential = true
       environment = [
         { name = "NODE_ENV", value = "production" },
+        { name = "METRICS_NAMESPACE", value = local.metrics_namespace },
         { name = "DATABASE_SSL", value = "verify" },
         { name = "DATABASE_CA_CERT_FILE", value = local.database_ca_file },
         { name = "GEMINI_LLM_MODEL", value = "gemini-3.8-flash" },
