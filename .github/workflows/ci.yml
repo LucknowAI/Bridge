@@ -51,25 +51,21 @@ jobs:
     name: Integration tests
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: matchmaker
-          POSTGRES_PASSWORD: matchmaker
-          POSTGRES_DB: matchmaker
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U matchmaker"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
+    # The same Postgres (with the Keycloak database) and Keycloak (with the
+    # realm import and theme) that docker compose runs locally.
     env:
       DATABASE_URL: postgres://matchmaker:matchmaker@localhost:5432/matchmaker
       DATABASE_SSL: disable
       SESSION_SECRET: ci-session-secret-long-enough-for-validation-x
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/match-maker
+      KEYCLOAK_PUBLIC_URL: http://localhost:8080
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_CLIENT_ID: match-maker-web
+      KEYCLOAK_CLIENT_SECRET: ci-client-secret
+      APP_BASE_URL: http://localhost:3000
+      # Suites skip themselves without these services; here that is a failure.
+      REQUIRE_SERVICES: db,keycloak
 
     steps:
       - uses: actions/checkout@v4
@@ -81,13 +77,29 @@ jobs:
 
       - run: npm ci
 
+      - name: Start Postgres and Keycloak
+        run: docker compose up -d --wait postgres keycloak
+
       # The suite calls migrate() itself, so this only proves the runner works
       # standalone — the way the deploy pipeline invokes it.
       - name: Apply migrations
         run: npm run db:migrate
 
+      - name: Configure Keycloak
+        run: |
+          npm run keycloak:wait
+          npm run keycloak:sync
+
       - name: Integration tests
-        run: npx vitest run tests/integration
+        run: npx vitest run tests/integration --reporter=default --reporter=json --outputFile=vitest-report.json
+
+      # A suite that skipped itself would otherwise count as a pass.
+      - name: Every integration test ran
+        run: npx tsx tools/check-test-report.ts vitest-report.json
+
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color postgres keycloak | tail -n 300
 
   build:
     name: Build images
