@@ -37,7 +37,10 @@
     "jobs:failed": "tsx tools/manage-jobs.ts failed",
     "jobs:retry": "tsx tools/manage-jobs.ts retry",
     "models:usage": "tsx tools/model-usage.ts",
-    "capacity:check": "tsx tools/capacity-check.ts"
+    "capacity:check": "tsx tools/capacity-check.ts",
+    "db:verify": "tsx tools/verify-database.ts",
+    "db:restore-rehearsal": "tsx tools/restore-rehearsal.ts",
+    "db:check-migrations": "tsx tools/check-migrations.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
