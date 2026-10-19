@@ -1,27 +1,35 @@
 import { renderInvitationEmail, sendNotificationEmail } from "@match-maker/email";
-import type { NotificationPort } from "../../application/ports/notification";
+import type { NotificationPort, NotificationTarget } from "../../application/ports/notification";
 
 export class RealtimeNotifier implements NotificationPort {
   async invitation(input: { email: string; name: string | null; eventName: string; organizationName: string; eventUrl: string }): Promise<void> {
     await sendNotificationEmail({ to: input.email, ...renderInvitationEmail(input) });
   }
 
-  async introRequested(input: { recipientEmail: string; recipientName: string; requesterName: string; eventName: string; introId: string }): Promise<void> {
-    const subject = `${input.requesterName} would like to meet at ${input.eventName}`;
-    const text = `Hi ${input.recipientName},\n\n${input.requesterName} requested an introduction at ${input.eventName}. Sign in to Mr. Bridge to respond.`;
-    await sendNotificationEmail({ to: input.recipientEmail, subject, text, html: emailHtml(input.recipientName, input.requesterName, input.eventName, "requested an introduction. Sign in to Mr. Bridge to respond.") });
+  introRequested(input: NotificationTarget): Promise<void> {
+    return send(input, `${input.otherName} would like to meet at ${input.eventName}`, `${input.otherName} requested an introduction. Accept to share contact details.`, "Respond");
   }
 
-  async introResponded(input: { recipientEmail: string; recipientName: string; requesterName: string; eventName: string; accepted: boolean }): Promise<void> {
-    const status = input.accepted ? "accepted" : "declined";
-    const subject = `Your introduction request was ${status}`;
-    const text = `Hi ${input.recipientName},\n\n${input.requesterName} ${status} your introduction request for ${input.eventName}.`;
-    await sendNotificationEmail({ to: input.recipientEmail, subject, text, html: emailHtml(input.recipientName, input.requesterName, input.eventName, `${status} your introduction request.`) });
+  introAccepted(input: NotificationTarget): Promise<void> {
+    return send(input, `${input.otherName} accepted your introduction`, `${input.otherName} accepted your introduction request. Their contact details are now on your Connections page.`, "See contact");
+  }
+
+  locationRequested(input: NotificationTarget): Promise<void> {
+    return send(input, `${input.otherName} is asking where you are`, `${input.otherName} would like to find you at ${input.eventName}. Sharing your venue zone is up to you.`, "Reply");
+  }
+
+  locationAnswered(input: NotificationTarget & { zone: string | null }): Promise<void> {
+    const text = input.zone ? `${input.otherName} is at ${input.zone}.` : `${input.otherName} would rather not share their location right now.`;
+    return send(input, input.zone ? `${input.otherName} is at ${input.zone}` : `${input.otherName} replied to your location request`, text, "Open connections");
   }
 }
 
-function emailHtml(name: string, otherPerson: string, event: string, action: string): string {
-  return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:32px;color:#18181b"><h2>Mr. Bridge</h2><p>Hi ${escapeHtml(name)},</p><p><strong>${escapeHtml(otherPerson)}</strong> ${escapeHtml(action)}</p><p>Event: ${escapeHtml(event)}</p><p>Open Mr. Bridge to view your connections.</p></div>`;
+async function send(input: NotificationTarget, subject: string, line: string, action: string): Promise<void> {
+  const text = `Hi ${input.recipientName},\n\n${line}\n\n${action}: ${input.link}`;
+  const html = `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:32px;color:#18181b"><h2>Mr. Bridge</h2>`
+    + `<p>Hi ${escapeHtml(input.recipientName)},</p><p>${escapeHtml(line)}</p><p>Event: ${escapeHtml(input.eventName)}</p>`
+    + `<p><a href="${escapeHtml(input.link)}" style="display:inline-block;padding:12px 18px;background:#f59e0b;color:#0a0a0e;border-radius:8px;text-decoration:none;font-weight:bold">${escapeHtml(action)}</a></p></div>`;
+  await sendNotificationEmail({ to: input.recipientEmail, subject, text, html });
 }
 
 function escapeHtml(value: string): string {

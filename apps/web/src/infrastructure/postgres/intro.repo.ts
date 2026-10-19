@@ -1,4 +1,4 @@
-import { query } from "@match-maker/db";
+import { outbox, query, transaction } from "@match-maker/db";
 import type { IntroRepository } from "../../application/ports/intro-repository";
 import type { IntroRequest, IntroStatus } from "../../domain/connection/intro-request.entity";
 
@@ -20,14 +20,20 @@ export class PostgresIntroRepository implements IntroRepository {
   async create(input: { eventId: string; requesterId: string; recipientId: string; message?: string | null }): Promise<IntroRequest> {
     if (input.requesterId === input.recipientId) throw new Error("You cannot request an intro to yourself");
     const message = input.message?.trim().slice(0, 500) || null;
-    const { rows } = await query<IntroRow>(
-      `insert into intro_requests (event_id, requester_id, recipient_id, message)
-       values ($1, $2, $3, $4)
-       on conflict (event_id, requester_id, recipient_id) do nothing
-       returning ${INTRO_COLUMNS}`,
-      [input.eventId, input.requesterId, input.recipientId, message]
-    );
-    if (rows[0]) return mapIntro(rows[0]);
+    // The request and its notification commit together, so neither is lost.
+    const created = await transaction(async (client) => {
+      const { rows } = await client.query<IntroRow>(
+        `insert into intro_requests (event_id, requester_id, recipient_id, message)
+         values ($1, $2, $3, $4)
+         on conflict (event_id, requester_id, recipient_id) do nothing
+         returning ${INTRO_COLUMNS}`,
+        [input.eventId, input.requesterId, input.recipientId, message]
+      );
+      if (!rows[0]) return null;
+      await outbox.enqueue({ eventId: input.eventId, recipientId: input.recipientId, kind: "intro.requested", subjectId: rows[0].id, dedupeKey: `intro.requested:${rows[0].id}` }, client);
+      return rows[0];
+    });
+    if (created) return mapIntro(created);
     throw new Error("An intro request already exists between these participants");
   }
 
@@ -40,14 +46,20 @@ export class PostgresIntroRepository implements IntroRepository {
   }
 
   async respond(eventId: string, introId: string, actorId: string, status: Extract<IntroStatus, "accepted" | "declined">): Promise<IntroRequest> {
-    const { rows } = await query<IntroRow>(
-      `update intro_requests set status = $4, responded_at = now()
-        where event_id = $1 and id = $2 and recipient_id = $3 and status = 'pending'
-       returning ${INTRO_COLUMNS}`,
-      [eventId, introId, actorId, status]
-    );
-    if (!rows[0]) throw new Error("Only the recipient can respond to a pending intro request");
-    return mapIntro(rows[0]);
+    const updated = await transaction(async (client) => {
+      const { rows } = await client.query<IntroRow>(
+        `update intro_requests set status = $4, responded_at = now()
+          where event_id = $1 and id = $2 and recipient_id = $3 and status = 'pending'
+         returning ${INTRO_COLUMNS}`,
+        [eventId, introId, actorId, status]
+      );
+      if (rows[0]?.status === "accepted") {
+        await outbox.enqueue({ eventId, recipientId: rows[0].requester_id, kind: "intro.accepted", subjectId: rows[0].id, dedupeKey: `intro.accepted:${rows[0].id}` }, client);
+      }
+      return rows[0] ?? null;
+    });
+    if (!updated) throw new Error("Only the recipient can respond to a pending intro request");
+    return mapIntro(updated);
   }
 
   async findBetween(eventId: string, a: string, b: string): Promise<IntroRequest[]> {

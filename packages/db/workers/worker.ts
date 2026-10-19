@@ -4,6 +4,7 @@ import { closePool } from "../src/client";
 import { processEmbedJob } from "./embed.worker";
 import { processMatchJob } from "./match.worker";
 import { sweepIfDue } from "./housekeeping.worker";
+import { processNotification } from "./notification.worker";
 
 let stopping = false;
 process.on("SIGINT", () => { stopping = true; });
@@ -16,7 +17,8 @@ async function main() {
     await sweepIfDue();
     const embedded = await processEmbedJob();
     const matched = await processMatchJob();
-    if (!embedded && !matched) await new Promise((resolve) => setTimeout(resolve, 1200));
+    const notified = await processNotification();
+    if (!embedded && !matched && !notified) await new Promise((resolve) => setTimeout(resolve, 1200));
   }
   await closePool();
   console.info("[worker] stopped");

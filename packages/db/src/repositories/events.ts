@@ -126,6 +126,12 @@ export async function update(input: {
   return findBySlug(old.organization_slug, old.slug);
 }
 
+/** Name and public slug, for notification text and links. */
+export async function basics(eventId: string): Promise<{ name: string; slug: string } | null> {
+  const { rows } = await query<{ name: string; slug: string }>(`select name, slug from events where id = $1`, [eventId]);
+  return rows[0] ?? null;
+}
+
 /** The event's status, or null when the event no longer exists. */
 export async function statusOf(eventId: string): Promise<EventRecord["status"] | null> {
   const { rows } = await query<{ status: EventRecord["status"] }>(`select status from events where id = $1`, [eventId]);
