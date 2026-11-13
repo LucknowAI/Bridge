@@ -28,7 +28,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ eventS
     <ProfileForm action={saveParticipantProfile.bind(null, eventSlug)} intents={intents} zones={zones} form={form} profile={{
       name: profile.name, designation: profile.designation, domain: profile.domain, aboutMe: profile.aboutMe,
       selfDescription: profile.selfDescription, mostImpressiveBuild: profile.mostImpressiveBuild,
-      yearsOfExperience: profile.yearsOfExperience, interests: profile.interests, intent: profile.intent, venueZone: profile.venueZone,
+      yearsOfExperience: profile.yearsOfExperience, interests: profile.interests, intent: profile.intent, venueZone: profile.venueZone, visible: profile.visible,
     }} />
   </main>;
 }

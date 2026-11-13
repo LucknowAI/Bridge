@@ -8,22 +8,22 @@ import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { getSession } from "../../lib/session";
 import { runFormAction, userMessage, type FormState } from "../../lib/form-state";
 
-export async function searchEventParticipants(eventSlug: string, searchText: string) {
+export async function searchEventParticipants(eventSlug: string, searchText: string, filters: { intent?: string | null; domain?: string | null } = {}) {
   try {
-    return { results: await searchEvent(eventSlug, searchText), error: null };
+    return { results: await searchEvent(eventSlug, searchText, filters), error: null };
   } catch (error) {
     return { results: [], error: userMessage(error, "Search failed. Please try again.") };
   }
 }
 
-async function searchEvent(eventSlug: string, searchText: string) {
+async function searchEvent(eventSlug: string, searchText: string, filters: { intent?: string | null; domain?: string | null }) {
   const session = await getSession();
   if (!session) throw new Error("Sign in to search this event");
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
   assertEventAllows(event.status, "search");
-  const results = await searchParticipants({ eventId: event.id, participantId: session.attendeeId, query: searchText }, container);
+  const results = await searchParticipants({ eventId: event.id, participantId: session.attendeeId, query: searchText, eventIntents: event.intents, filters }, container);
   return results.map((match) => ({
     id: match.participant.attendeeId,
     name: match.participant.name,

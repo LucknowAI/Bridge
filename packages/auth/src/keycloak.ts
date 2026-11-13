@@ -387,6 +387,13 @@ export async function setUserEnabled(sub: string, enabled: boolean): Promise<voi
   userStatus.delete(sub);
 }
 
+/** Deletes the Keycloak user (account erasure). Missing users are fine. */
+export async function deleteUser(sub: string): Promise<void> {
+  const res = await adminFetch(`/users/${encodeURIComponent(sub)}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error(`Keycloak user deletion failed (${res.status})`);
+  userStatus.delete(sub);
+}
+
 /** Ends the user's Keycloak (SSO) sessions, so Google sign-in asks again. */
 export async function logoutUser(sub: string): Promise<void> {
   const res = await adminFetch(`/users/${encodeURIComponent(sub)}/logout`, { method: "POST" });
