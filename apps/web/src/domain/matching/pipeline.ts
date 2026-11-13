@@ -25,6 +25,12 @@ export interface MatchingInput {
   limit?: number;
 }
 
+/**
+ * Bump when scorers, weights, or stage behavior change, so persisted matches
+ * from an older computation can be recognised and recomputed.
+ */
+export const MATCHING_PIPELINE_VERSION = "v1";
+
 /** Same retrieve/filter/score/top-K/rerank pipeline for both entry points. */
 export class MatchingPipeline {
   private readonly retrieve: RetrieveStage;
@@ -56,7 +62,8 @@ export class MatchingPipeline {
   async run(input: MatchingInput) {
     if (input.mode === "search" && !input.query?.trim()) throw new Error("Enter a search query");
     const storedProfile = await this.participants.findProfile(input.eventId, input.participantId);
-    if (!storedProfile) throw new Error("Complete your event profile before continuing");
+    // Hidden viewers may still browse; only a saved profile is required.
+    if (!storedProfile?.profileComplete) throw new Error("Complete your event profile before continuing");
 
     const embeddingText = input.mode === "search" ? input.query!.trim() : profileText(storedProfile);
     const embedding = input.mode === "profile" && storedProfile.embedding
@@ -77,10 +84,10 @@ export class MatchingPipeline {
     const compatible = this.filter.execute(viewer, retrieved);
     const scored = this.score.execute(viewer, compatible);
     const top = this.topK.execute(scored, input.limit ?? 12);
-    const ranked = await this.rerank.execute(viewer, top);
+    const { candidates: ranked, rankedBy } = await this.rerank.execute(viewer, top);
 
     if (input.mode === "profile") {
-      await this.persist.execute(input.eventId, input.participantId, ranked);
+      await this.persist.execute(input.eventId, input.participantId, ranked, `${MATCHING_PIPELINE_VERSION}+${rankedBy}`);
     }
     return ranked;
   }
