@@ -1,0 +1,46 @@
+# Copy to terraform.tfvars and edit. Never commit the real file — it is gitignored.
+
+aws_region   = "ap-south-1"
+project_name = "match-maker"
+environment  = "prod"
+default_event_slug = "demo"
+
+# ── DNS / TLS ─────────────────────────────────────────────────
+# Leave all three empty for a first apply; the stack comes up on the ALB's own
+# DNS name over HTTP, and you can add the domain later.
+domain_name          = ""
+keycloak_domain_name = ""
+acm_certificate_arn  = ""
+route53_zone_id      = ""
+
+# ── CI/CD ─────────────────────────────────────────────────────
+# Enables the GitHub OIDC deploy role. Format: "owner/repo".
+github_repository = "LucknowAI/Bridge"
+
+# ── Sizing ────────────────────────────────────────────────────
+web_desired_count = 2
+web_min_capacity  = 2
+web_max_capacity  = 10
+worker_desired_count = 1
+
+keycloak_min_capacity = 1
+keycloak_max_capacity = 4
+
+db_instance_class = "db.t4g.micro"
+db_multi_az       = false
+
+# Set false to skip NAT gateways (~USD 32/month each) while evaluating.
+enable_nat_gateway = true
+
+# ── Secrets ───────────────────────────────────────────────────
+# Prefer leaving these empty and filling the values into Secrets Manager after
+# the first apply, so they never touch a local file or the state.
+gemini_api_key       = ""
+upstash_redis_rest_url = ""
+upstash_redis_rest_token = ""
+resend_api_key       = ""
+google_client_id     = ""
+google_client_secret = ""
+
+email_from  = "Mr. Bridge <login@example.com>"
+alarm_email = ""

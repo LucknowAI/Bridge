@@ -1,0 +1,153 @@
+# ==============================================================
+# Local development stack — mirrors the ECS topology:
+#   web  ──> Keycloak (OIDC)  ──> Google
+#    └────>  Postgres
+#
+# Bring it up with:  npm run docker:up
+# ==============================================================
+
+name: match-maker
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-matchmaker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-matchmaker}
+      POSTGRES_DB: ${POSTGRES_DB:-matchmaker}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Creates the second database Keycloak needs, on first boot only.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-matchmaker} -d ${POSTGRES_DB:-matchmaker}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    # `start-dev` skips the production hostname/TLS requirements, which is the
+    # only reason this works over plain http on localhost.
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-matchmaker}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-matchmaker}
+      KC_HEALTH_ENABLED: "true"
+      # Tokens must be issued with the hostname the BROWSER uses, or the `iss`
+      # claim won't match what the app verifies against.
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}
+      KC_HOSTNAME_STRICT: "false"
+      # Substituted into realm-export.json at import time.
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-dev-client-secret-change-me}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-not-configured}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-not-configured}
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # The image has no curl/wget; Keycloak 25+ exposes health on the
+      # management port 9000, reachable through the JVM's own shell redirect.
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -Eq '\"status\"[[:space:]]*:[[:space:]]*\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # One-shot: applies SQL migrations, then seeds demo attendees. Exits 0.
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/migrate.Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-matchmaker}:${POSTGRES_PASSWORD:-matchmaker}@postgres:5432/${POSTGRES_DB:-matchmaker}
+      DATABASE_SSL: disable
+      SEED_ON_MIGRATE: ${SEED_ON_MIGRATE:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      DEFAULT_EVENT_SLUG: ${DEFAULT_EVENT_SLUG:-demo}
+
+      DATABASE_URL: postgres://${POSTGRES_USER:-matchmaker}:${POSTGRES_PASSWORD:-matchmaker}@postgres:5432/${POSTGRES_DB:-matchmaker}
+      DATABASE_SSL: disable
+
+      # Public issuer for browser redirects and `iss` verification…
+      KEYCLOAK_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}/realms/match-maker
+      # …internal issuer for token exchange, JWKS and the admin API.
+      KEYCLOAK_INTERNAL_ISSUER: http://keycloak:8080/realms/match-maker
+      KEYCLOAK_CLIENT_ID: match-maker-web
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-dev-client-secret-change-me}
+
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required - see .env.example}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Mr. Bridge <onboarding@resend.dev>}
+      # Local convenience: with no Resend key, print the login e-mail to the log
+      # instead of sending it. Must never be set in a deployed environment.
+      EMAIL_DEV_FALLBACK: ${EMAIL_DEV_FALLBACK:-true}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-3.8-flash}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
+      LOCAL_BGE_URL: ${LOCAL_BGE_URL:-}
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/worker.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-matchmaker}:${POSTGRES_PASSWORD:-matchmaker}@postgres:5432/${POSTGRES_DB:-matchmaker}
+      DATABASE_SSL: disable
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-3.8-flash}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
+      LOCAL_BGE_URL: ${LOCAL_BGE_URL:-}
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Mr. Bridge <onboarding@resend.dev>}
+      EMAIL_DEV_FALLBACK: ${EMAIL_DEV_FALLBACK:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 30s
+
+volumes:
+  postgres-data:

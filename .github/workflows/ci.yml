@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push supersedes an in-flight run on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  quality:
+    name: Lint, typecheck & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npx vitest run tests/unit
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: matchmaker
+          POSTGRES_PASSWORD: matchmaker
+          POSTGRES_DB: matchmaker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U matchmaker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://matchmaker:matchmaker@localhost:5432/matchmaker
+      DATABASE_SSL: disable
+      SESSION_SECRET: ci-session-secret-long-enough-for-validation-x
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # The suite calls migrate() itself, so this only proves the runner works
+      # standalone — the way the deploy pipeline invokes it.
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Integration tests
+        run: npx vitest run tests/integration
+
+  build:
+    name: Build images
+    runs-on: ubuntu-latest
+    needs: [quality]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build only — publishing happens in deploy.yml, and only from main.
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/migrate.Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/worker.Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Keycloak image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/keycloak.Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  terraform:
+    name: Terraform validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+        working-directory: infra/terraform
+
+      # No backend, no credentials — this only checks the configuration parses
+      # and is internally consistent.
+      - name: Init (no backend)
+        run: terraform init -backend=false
+        working-directory: infra/terraform
+
+      - name: Validate
+        run: terraform validate
+        working-directory: infra/terraform

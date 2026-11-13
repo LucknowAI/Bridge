@@ -1,0 +1,96 @@
+# Mr. Bridge production roadmap
+
+The production signup policy is **invited attendees claim their account**. An organizer imports the roster; an attendee proves ownership of the invited email, completes an event profile, receives matches, requests an introduction, and sees contact information only after acceptance. Public account registration remains disabled.
+
+The repository has the main product flows and deployment scaffolding. It still needs work on account linking, invitation management, event isolation, worker recovery, automated coverage, and production operations before launch. All changes can stay within the current directory layout. Effort estimates assume one developer familiar with Next.js, PostgreSQL, Keycloak, and AWS; they exclude waiting for credentials, DNS, external approvals, and user acceptance testing. A day means about six focused implementation hours.
+
+## Authentication findings
+
+| Requirement | Current implementation | Remaining work |
+| --- | --- | --- |
+| Website login matches its UI | `apps/web/app/login.jsx` uses the existing dark and amber design. | Check mobile layout, contrast, reduced motion, and all error states in a browser. |
+| Invite claim rather than public signup | `keycloak/realm-export.json` has `registrationAllowed: false`. OTP endpoints require an imported attendee; successful OTP verification calls `ensureUser`. The event page already has a claim link. | Add invitation delivery, expiry/revocation, claim timestamps, and organizer controls. There is no separate public signup form. |
+| Phone and email login remain on the website | Both options now use the site's OTP request and verification endpoints. Keycloak provisioning happens on the server. | Configure real email delivery and test against running dependencies. This is app-managed passwordless verification with a Keycloak identity, rather than a Keycloak OIDC session for the email path. |
+| Explicit Google option | A separate **Sign in with Google** option now invokes the existing Keycloak authorization-code flow with PKCE, state, nonce, and `kc_idp_hint=google`. | Supply Google OAuth credentials and test live authentication. The callback checks the roster, event membership, and verified email. |
+| No separate Keycloak login page | The Google hint bypasses the initial Keycloak login form. | The realm still uses the default `first broker login` flow. An existing OTP-created user may encounter linking or reauthentication screens. No custom Keycloak theme is present. |
+| Same website address during login | Normal code verification uses same-origin requests. `infra/terraform/alb.tf` already supports Keycloak paths under the app domain. | Deploy and verify that shared-domain configuration if this is a strict requirement. Google authentication still visits Google's own account chooser. |
+| Logout and session expiry | Encrypted HTTP-only app cookies exist. The API logout supports Keycloak logout; the participant server action only clears the local cookie. | Unify logout, implement revocation, and fix middleware that redirects based only on cookie presence. |
+
+Google's authorization endpoint is hosted by Google; the existing redirect-based integration cannot authenticate a Google account entirely within the app origin. See [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect). Keycloak's [first broker login documentation](https://www.keycloak.org/docs/latest/server_admin/index.html#_identity_broker_first_login) describes the account linking screens that can still appear. Treat automatic account linking as a separate identity-security change with explicit tests.
+
+## Changes delivered with this review
+
+- Added an explicit Google option using the existing backend flow and matching the website's styling.
+- Changed the email option to use on-site email-code verification, alongside phone lookup and email verification.
+- Kept imported-attendee and event-membership checks. No public registration was enabled.
+- Made the method controls keyboard accessible and added input labels and focus styling.
+- Shared destination normalization across login and callback handling, rejecting external destinations, backslashes, and control characters. Normalization also happens before checking event access.
+- Required verified email for the Google callback and cleared transient OAuth cookies on callback outcomes.
+- Added redirect and route tests covering email/phone requests, local session creation, Google start/callback, roster rejection, event rejection, and OAuth state rejection.
+
+## Work ordered from shortest to longest
+
+This table orders estimated effort, not security priority. **Blocker** means the item must be resolved before a production release. Dependencies take precedence over the table order; the execution sequence below groups them into working releases.
+
+| ID | Work and evidence | Effort | Completion condition |
+| --- | --- | --- | --- |
+| 1 | Standardize the runtime and configuration. Root `package.json` permits Node 20+, while CI and images use 22. Validate required settings at startup and document local/staging/production values. | 1–3 hours | A fresh checkout uses one supported runtime and fails with actionable messages for missing settings. |
+| 2 | Activate Google sign-in. Google credentials in local `.env` are blank. Configure the Google provider, consent settings, and exact callback URLs for each environment. | 1–3 hours | A real invited Google account returns to its intended event. No client secret reaches browser code. |
+| 3 | Fix development commands on Windows. `apps/web/package.json` uses shell syntax `${PORT:-3000}`. Verify environment loading from the web workspace and Turbo's environment allowlist. | 2–4 hours | Documented PowerShell commands work from a fresh checkout and use the intended database and issuers. |
+| 4 | **Blocker:** configure production email and disable development email logging. Compose defaults `EMAIL_DEV_FALLBACK=true`; that must stay local. | 2–4 hours | Login messages arrive from a verified sender, failures surface clearly, and deployed logs contain no login codes or links. |
+| 5 | Fix login destinations and expired-cookie handling. `apps/web/middleware.ts` tests cookie presence rather than validity and ignores `returnTo`. Callback errors lose event context. | 3–6 hours | Expired/tampered cookies show login without a loop; successful and failed attempts retain their event destination. |
+| 6 | Finish interface states in existing pages: pending submissions, actionable form errors, loading/error boundaries, keyboard use, contrast, mobile layouts, and reduced motion. The animated login and inline-styled organizer pages need browser checks. | 4–8 hours | Participant and organizer flows work with a keyboard, on mobile, and after server errors without losing entered values. |
+| 7 | Complete organizer administration. `tools/bootstrap-organization.ts` creates the first owner, but there is no complete UI for member invites, role changes, and revocation. | 1–2 days | An owner can add/remove organizers; lower roles cannot grant themselves owner access. Define organization/event role permissions explicitly. |
+| 8 | **Blocker:** retire or secure the legacy global matching endpoint. `apps/web/app/api/match/route.js` calls `attendees.listMatchCandidates`, which queries the entire attendee directory without an event filter. Its cached uploaded file is also global per process. | 1–2 days | Every reachable matching/search endpoint enforces event membership and event-scoped retrieval; an event A user never receives event B profiles or uses their cached data. Keep route files in place if disabling legacy behavior. |
+| 9 | Keep Keycloak under the app domain and match fallback identity screens to the website. Extend existing `keycloak` and Docker assets; use the shared-domain routing already in `infra/terraform/alb.tf`. | 1–2 days | Login, errors, and required account actions use the expected branding and app hostname; Google remains the external provider. Restrict the public admin route separately. |
+| 10 | Add shared server validation and request limits. Existing validation is scattered; organizer actions permit a 10 MB spreadsheet while the framework's action limit needs alignment. Validate identifiers, UUIDs, text sizes, workbook rows, and malformed JSON. | 1–2 days | Invalid and oversized inputs receive controlled errors before parsing, database work, or provider calls. |
+| 11 | Enforce event lifecycle and visibility consistently. Profile/search paths check open status, but intro requests and refresh actions have different rules. Candidate retrieval checks visibility but does not require a completed profile. | 1–2 days | Draft, open, and closed events have defined permissions across all actions; incomplete/hidden profiles are excluded as intended. |
+| 12 | **Blocker:** harden authentication abuse controls. OTP request throttling counts rows before inserting; lookup exposes roster membership/name; attempt increments and redemption are separate operations. Add atomic limits by address and trusted client IP, bounded verification, origin/CSRF checks for cookie-authenticated JSON mutations, and token cleanup. | 1–2 days | Concurrent requests cannot bypass issue/attempt limits; disallowed origins fail; unauthenticated callers cannot cheaply enumerate the roster. Preserve the existing single-use consume protection. |
+| 13 | **Blocker:** enforce production transport and least privilege. `packages/db/src/client.ts` uses `rejectUnauthorized: false` without a CA. App and Keycloak share elevated database credentials; TLS on the ALB is optional. | 1–2 days | Production requires HTTPS, validates database certificates, separates migration/app/Keycloak database permissions, and restricts identity administration. Harden secret recovery and Terraform state access. |
+| 14 | **Blocker:** correct release artifact selection and release gates. `deploy.yml` runs the registered migration family without pinning it to the image just built. Optional Keycloak rollout rebuilds an image but only forces deployment. Production deployment does not depend on all CI jobs. | 1–2 days | Web, worker, migrator, and optional Keycloak tasks reference the intended release; lint/integration/build checks gate deployment; smoke tests cannot silently skip for missing URL; rollback is exercised. |
+| 15 | Finish invited account claiming. Existing roster import and OTP provide the foundation. Add invite delivery/resend/revoke, claim status and timestamps, consent, profile completion, and wrong-invitation recovery. Do not treat the public event URL as proof of invitation. | 1–3 days | Only invited addresses claim event access; expired/revoked invitations fail; repeat claims reuse the same identity; organizers see invited/claimed/completed status. Depends on 4, 10, 12. |
+| 16 | **Blocker:** make Google/OTP account linking and session revocation complete. `ensureUser` creates passwordless users; the default first-broker flow may ask them for a password or Keycloak email verification. Local cookies can outlive Keycloak session revocation. | 2–3 days | OTP→Google and Google→OTP resolve to one identity without a dead end. Disabled users and revoked sessions lose app access. Test wrong-account linking, logout, and recovery. Depends on 2, 9, 12. |
+| 17 | Make roster imports safe across organizations. `PostgresEventRepository.importRoster` upserts the global attendee record and attaches roster rows in separate steps. Imports can partially apply or overwrite another organization's shared identity fields. | 2–3 days | Preview and row errors precede import; identity ownership rules are explicit; a retry is idempotent; partial failures recover; one organizer cannot silently replace another user's identity/contact data. |
+| 18 | Add privacy and abuse controls to the contact-sharing flow. Contact reads already require an accepted intro. Add blocking/reporting, visibility controls, retention/export/deletion flows, and moderation access with an audit trail. | 2–4 days | Unauthorized users never see contact data; blocked or revoked relationships follow a defined policy; attendee data can be removed from caches, exports, and provider uploads under the chosen retention policy. |
+| 19 | **Blocker:** make workers recoverable. `matchingJobs.claim` marks jobs running, but there is no lease timeout/reaper for a crashed worker. Exhausted attempts have no operator retry flow. | 2–4 days | Kill a worker during a job and its work is reclaimed; retries back off; terminal failures are visible and replayable; duplicate and profile-update races do not leave stale results. |
+| 20 | Validate matching quality and failure behavior. Verify model availability for the configured provider, embedding dimensions, fallback behavior, profile/query scoring, cache invalidation, and cost limits. Existing providers enforce timeouts, but embedding failure can fail the job rather than use baseline scoring. | 2–4 days | Provider outage still yields defined behavior; hidden/updated profiles invalidate affected results; fixture evaluations show relevant intent-compatible matches and bounded provider cost. |
+| 21 | Make notifications reliable. `RealtimeNotifier` sends email inline and failures are logged; it does not supply live browser updates. Add a transactional outbox, retry delivery, deep links, deduplication, and delivery status; add polling or push only if required. | 2–4 days | Intro creation/response survives email failure and duplicate delivery; a user can follow a notification to the correct event action. Depends on 4, 19. |
+| 22 | **Blocker:** extend automated coverage beyond authentication. Existing tests cover OTP, session, email, and attendee helpers; the integration suite covers login challenges. The new route tests mock dependencies. Add real database, Keycloak, tenant, organizer, intro/contact, matching, and browser tests. | 3–5 days | CI proves the full journey below plus cross-event denial, revocation, replay, concurrent requests, and outage recovery. No critical dependency suite is silently skipped. |
+| 23 | **Blocker:** stage and operate the release. Terraform already defines RDS backups, monitoring, autoscaling, and deployment circuit breakers. Add worker/OTP/provider/notification metrics, restore and rollback drills, secret rotation, actionable alerts, and capacity tests. | 3–5 days | An isolated staging release passes the journey and failure drills at the chosen attendee/concurrency target. Backup restoration, release rollback, incident ownership, and launch monitoring are demonstrated. |
+
+Some tasks overlap. For example, task 22 should add tests as tasks 8, 12, 16, and 19 are implemented, rather than waiting until the end. Estimates are planning ranges, not a fixed delivery commitment.
+
+## Execution sequence from setup to launch
+
+1. **Establish a reproducible local stack:** tasks 1–4. Run PostgreSQL, Keycloak, migrations, web, and worker. Confirm both code login and live Google sign-in with invited test identities.
+2. **Finish identity and invited access:** tasks 5, 9, 12, 15, and 16. Prove account claiming, linking, recovery, session expiry, and revocation before building further onboarding behavior.
+3. **Finish organizer operations and event isolation:** tasks 7, 8, 10, 11, and 17. Create an organization/event, import safely, configure it, and prove denial from another event or organization.
+4. **Finish the participant journey:** tasks 6, 18, 20, and 21. Complete profiles, discover useful matches, request/respond to intros, and reveal contacts only after consent. Validate hidden profiles and event closure.
+5. **Finish reliability and secure delivery:** tasks 13, 14, and 19. Prove certificate validation, least privilege, crash recovery, migration ordering, release pinning, and rollback.
+6. **Release through staging:** finish tasks 22 and 23. Run the entire journey with production-like services and configuration, then promote the same tested images and migration artifacts to production.
+
+## Google configuration steps
+
+1. Create a Google OAuth web client for each environment and configure the consent screen and allowed test users while testing.
+2. For the default local stack, register `http://localhost:8080/realms/match-maker/broker/google/endpoint` as Google's authorized redirect URI. Google returns to Keycloak here, not directly to the Next.js callback.
+3. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the root `.env` for the local Keycloak service. Supply production values through the existing secrets configuration.
+4. In Keycloak's `match-maker` realm, verify **Identity providers → google** uses those values. Its web client must allow the app's `/auth/callback` URL.
+5. On an already initialized database, update the provider in the running realm. Merely changing `.env` or the realm JSON and restarting does not update an existing imported realm: [Keycloak startup imports skip existing realms](https://www.keycloak.org/server/importExport). Do not delete the database to refresh credentials.
+6. Test a first Google login, OTP followed by Google, Google followed by OTP, an uninvited account, a revoked attendee, denied consent, expired state, and logout. Complete task 16 before claiming all linking cases work.
+
+## End to end acceptance journey
+
+1. Bootstrap the first organization owner using an authorized imported identity. Owner signs in and creates an event.
+2. Import two invited attendees and one attendee belonging only to another event. Confirm row errors and duplicate-import behavior.
+3. Send invitations. Attendee A claims with an email code entirely on the website; attendee B claims with Google and returns to the same event.
+4. Both complete profiles with configured intents and zones. Refresh the page and confirm persistence.
+5. Queue matching and observe pending, processing, success, and failure states. Restart the worker during processing and confirm recovery.
+6. Search and view matches. A cannot see the other event's attendees, hidden profiles, or contact details before acceptance.
+7. A requests an introduction to B. B receives a notification, opens the correct event, and accepts. Only then do their contacts appear. Test decline, replay, self-introduction, duplicate requests, and a different user trying to accept.
+8. Share a venue zone only within an accepted introduction and verify the location expiry behavior.
+9. Close the event and verify every affected action obeys the defined closure rules. Revoke a membership/session and verify access stops.
+10. Exercise expired codes, email outage, Google cancellation, provider timeout, database outage, migration failure, previous-image rollback, and backup restoration before approving the release.
+
+## Validation boundaries
+
+Unit and mocked route tests can verify routing, roster decisions, cookies, and OAuth checks without live providers. Successful real email delivery, Keycloak account linking, Google consent, database integration, browser appearance, and container startup still require the services to run. Docker Desktop's engine was unavailable during this review, so these live outcomes are release checks rather than confirmed results.
