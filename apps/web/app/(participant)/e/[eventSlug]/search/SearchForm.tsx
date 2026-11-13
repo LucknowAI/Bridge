@@ -78,7 +78,7 @@ export default function SearchForm({ eventSlug, intents, domains }: { eventSlug:
           <p style={muted}>{[person.designation, person.domain].filter(Boolean).join(" · ")}</p>
           {person.aboutMe && <p>{person.aboutMe}</p>}
           <p style={{ color: "#fbbf24" }}>{person.reason}</p>
-          {person.mutualInterest && <small style={muted}>Your event goals align</small>}
+          {person.mutualInterest && <small style={muted}>Likely a strong fit for each other</small>}
         </div>
         <ActionForm action={requestParticipantIntro.bind(null, eventSlug)} hidden={{ recipientId: person.id }} label="Request intro" pendingLabel="Sending…" />
       </article>)}

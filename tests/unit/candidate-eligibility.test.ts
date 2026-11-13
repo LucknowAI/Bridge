@@ -31,11 +31,16 @@ describe("matching pipeline viewer", () => {
     const participants = {
       findProfile: vi.fn(async () => viewer),
       listCandidates: vi.fn(async () => [eligible, hidden, incomplete]),
+      findCandidatesByIds: vi.fn(async (_event: string, ids: string[]) => [eligible, hidden, incomplete].filter((p) => ids.includes(p.attendeeId))),
+      corpusRevision: vi.fn(async () => 1),
       setEmbedding: vi.fn(),
     } as unknown as ParticipantRepository;
     const matches = { save: vi.fn(), listForParticipant: vi.fn() } satisfies MatchRepository;
-    const embeddings = { embed: vi.fn(async () => null) };
-    const cache = { get: vi.fn(), set: vi.fn() };
+    const embeddings = { id: "test-embeddings", embed: vi.fn(async () => null) };
+    const cache = {
+      get: vi.fn(async () => null), set: vi.fn(async () => {}), getVector: vi.fn(async () => null), setVector: vi.fn(async () => {}),
+      acquire: vi.fn(async () => "token"), release: vi.fn(async () => {}),
+    };
     return { pipeline: new MatchingPipeline(participants, matches, embeddings, null, cache), matches };
   }
   const run = (pipeline: MatchingPipeline, mode: "profile" | "search") =>
@@ -64,7 +69,9 @@ describe("intro request recipient", () => {
       hasEventAccess: vi.fn(async () => true),
       findProfile: vi.fn(async (_eventId: string, id: string) => (id === "requester" ? profile("requester") : recipient)),
     } as unknown as ParticipantRepository;
-    const intros = { create: vi.fn(async () => ({ id: "intro" })) } as unknown as IntroRepository;
+    const intros = {
+      create: vi.fn(async () => ({ id: "intro" })), findBetween: vi.fn(async () => []), countPendingOutgoing: vi.fn(async () => 0),
+    } as unknown as IntroRepository;
     return { participants, intros };
   }
   const send = (dependencies: ReturnType<typeof setup>, recipientId: string) =>
