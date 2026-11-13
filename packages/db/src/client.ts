@@ -1,4 +1,5 @@
 import pg from "pg";
+import { readFileSync } from "node:fs";
 import type { ConnectionOptions as TlsOptions } from "node:tls";
 
 const { Pool } = pg;
@@ -38,8 +39,6 @@ export function getPool(): pg.Pool {
 
   pool = new Pool({
     connectionString,
-    // RDS terminates TLS with an Amazon-issued CA that is not in Node's default
-    // trust store. Verification is enabled only when a CA bundle is supplied.
     ssl: resolveSsl(connectionString),
     max: Number(process.env.DATABASE_POOL_MAX ?? 10),
     idleTimeoutMillis: 30_000,
@@ -56,18 +55,36 @@ export function getPool(): pg.Pool {
   return pool;
 }
 
-function resolveSsl(connectionString: string): TlsOptions | false {
-  if (process.env.DATABASE_SSL === "disable") return false;
+/**
+ * TLS for a connection, from DATABASE_SSL:
+ *   disable  plain connection (local docker-compose Postgres has no TLS)
+ *   require  encrypted, certificate not checked
+ *   verify   encrypted and the server certificate is checked against
+ *            DATABASE_CA_CERT (PEM text) or DATABASE_CA_CERT_FILE (a path);
+ *            production images ship the RDS bundle for this
+ * Unset: off for local hosts, otherwise verify when a CA is configured and
+ * require when not. Production startup refuses `require` for remote hosts.
+ */
+export function resolveSsl(connectionString: string, env: NodeJS.ProcessEnv = process.env): TlsOptions | false {
+  const mode = env.DATABASE_SSL;
+  if (mode === "disable") return false;
+  if (!mode && isLocalDatabase(connectionString)) return false;
 
-  // Local docker-compose Postgres has no TLS at all.
-  const isLocal =
-    connectionString.includes("@localhost") ||
-    connectionString.includes("@127.0.0.1") ||
-    connectionString.includes("@postgres:");
-  if (isLocal && process.env.DATABASE_SSL !== "require") return false;
+  const ca = env.DATABASE_CA_CERT || (env.DATABASE_CA_CERT_FILE ? readFileSync(env.DATABASE_CA_CERT_FILE, "utf8") : "");
+  if (mode === "verify" && !ca) {
+    throw new Error("DATABASE_SSL=verify needs DATABASE_CA_CERT or DATABASE_CA_CERT_FILE");
+  }
+  if (mode === "verify" || (!mode && ca)) return { ca, rejectUnauthorized: true };
+  return { rejectUnauthorized: false };
+}
 
-  const ca = process.env.DATABASE_CA_CERT;
-  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: false };
+/** Local docker-compose or developer databases, which have no TLS. */
+export function isLocalDatabase(connectionString: string): boolean {
+  try {
+    return ["localhost", "127.0.0.1", "postgres"].includes(new URL(connectionString).hostname);
+  } catch {
+    return false;
+  }
 }
 
 /** Run a parameterised query. Never interpolate user input into `text`. */

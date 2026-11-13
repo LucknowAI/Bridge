@@ -1,6 +1,7 @@
-import { query } from "@match-maker/db";
+import { outbox, query, transaction } from "@match-maker/db";
 import type { IntroRepository } from "../../application/ports/intro-repository";
 import type { IntroRequest, IntroStatus } from "../../domain/connection/intro-request.entity";
+import { introRequestRefusal } from "../../domain/connection/connection.rules";
 
 interface IntroRow {
   id: string;
@@ -20,16 +21,31 @@ export class PostgresIntroRepository implements IntroRepository {
   async create(input: { eventId: string; requesterId: string; recipientId: string; message?: string | null }): Promise<IntroRequest> {
     if (input.requesterId === input.recipientId) throw new Error("You cannot request an intro to yourself");
     const message = input.message?.trim().slice(0, 500) || null;
-    const { rows } = await query<IntroRow>(
-      `insert into intro_requests (event_id, requester_id, recipient_id, message)
-       values ($1, $2, $3, $4)
-       on conflict (event_id, requester_id, recipient_id) do update
-         set status = 'pending', message = excluded.message, created_at = now(), responded_at = null
-         where intro_requests.status = 'declined'
-       returning ${INTRO_COLUMNS}`,
-      [input.eventId, input.requesterId, input.recipientId, message]
-    );
-    if (rows[0]) return mapIntro(rows[0]);
+    // The request and its notification commit together, so neither is lost.
+    const created = await transaction(async (client) => {
+      // One lock per pair of people, in either direction, so two requests
+      // crossing at the same moment cannot both pass the check below.
+      const [first, second] = [input.requesterId, input.recipientId].sort();
+      await client.query(`select pg_advisory_xact_lock(hashtext('intro:' || $1 || ':' || $2 || ':' || $3))`, [input.eventId, first, second]);
+      const { rows: existing } = await client.query<IntroRow>(
+        `select ${INTRO_COLUMNS} from intro_requests
+          where event_id = $1 and ((requester_id = $2 and recipient_id = $3) or (requester_id = $3 and recipient_id = $2))`,
+        [input.eventId, input.requesterId, input.recipientId]
+      );
+      const refusal = introRequestRefusal(input.requesterId, existing.map(mapIntro));
+      if (refusal) throw new Error(refusal);
+      const { rows } = await client.query<IntroRow>(
+        `insert into intro_requests (event_id, requester_id, recipient_id, message)
+         values ($1, $2, $3, $4)
+         on conflict (event_id, requester_id, recipient_id) do nothing
+         returning ${INTRO_COLUMNS}`,
+        [input.eventId, input.requesterId, input.recipientId, message]
+      );
+      if (!rows[0]) return null;
+      await outbox.enqueue({ eventId: input.eventId, recipientId: input.recipientId, kind: "intro.requested", subjectId: rows[0].id, dedupeKey: `intro.requested:${rows[0].id}` }, client);
+      return rows[0];
+    });
+    if (created) return mapIntro(created);
     throw new Error("An intro request already exists between these participants");
   }
 
@@ -42,21 +58,46 @@ export class PostgresIntroRepository implements IntroRepository {
   }
 
   async respond(eventId: string, introId: string, actorId: string, status: Extract<IntroStatus, "accepted" | "declined">): Promise<IntroRequest> {
+    const updated = await transaction(async (client) => {
+      const { rows } = await client.query<IntroRow>(
+        `update intro_requests set status = $4, responded_at = now()
+          where event_id = $1 and id = $2 and recipient_id = $3 and status = 'pending'
+         returning ${INTRO_COLUMNS}`,
+        [eventId, introId, actorId, status]
+      );
+      if (rows[0]?.status === "accepted") {
+        await outbox.enqueue({ eventId, recipientId: rows[0].requester_id, kind: "intro.accepted", subjectId: rows[0].id, dedupeKey: `intro.accepted:${rows[0].id}` }, client);
+      }
+      return rows[0] ?? null;
+    });
+    if (!updated) throw new Error("Only the recipient can respond to a pending intro request");
+    return mapIntro(updated);
+  }
+
+  async findBetween(eventId: string, a: string, b: string): Promise<IntroRequest[]> {
     const { rows } = await query<IntroRow>(
-      `update intro_requests set status = $4, responded_at = now()
-        where event_id = $1 and id = $2 and recipient_id = $3 and status = 'pending'
-       returning ${INTRO_COLUMNS}`,
-      [eventId, introId, actorId, status]
+      `select ${INTRO_COLUMNS} from intro_requests
+        where event_id = $1 and ((requester_id = $2 and recipient_id = $3) or (requester_id = $3 and recipient_id = $2))`,
+      [eventId, a, b]
     );
-    if (!rows[0]) throw new Error("Only the recipient can respond to a pending intro request");
-    return mapIntro(rows[0]);
+    return rows.map(mapIntro);
+  }
+
+  async countPendingOutgoing(eventId: string, requesterId: string): Promise<number> {
+    const { rows } = await query<{ count: number }>(
+      `select count(*)::int as count from intro_requests where event_id = $1 and requester_id = $2 and status = 'pending'`,
+      [eventId, requesterId]
+    );
+    return rows[0]?.count ?? 0;
   }
 
   async listForParticipant(eventId: string, participantId: string): Promise<IntroRequest[]> {
     const { rows } = await query<IntroRow>(
-      `select ${INTRO_COLUMNS} from intro_requests
-        where event_id = $1 and (requester_id = $2 or recipient_id = $2)
-        order by created_at desc`,
+      `select ${INTRO_COLUMNS_R} from intro_requests r
+         join event_participants other on other.event_id = r.event_id
+          and other.attendee_id = case when r.requester_id = $2 then r.recipient_id else r.requester_id end
+        where r.event_id = $1 and (r.requester_id = $2 or r.recipient_id = $2) and other.revoked_at is null
+        order by r.created_at desc`,
       [eventId, participantId]
     );
     return rows.map(mapIntro);
@@ -71,6 +112,8 @@ export class PostgresIntroRepository implements IntroRepository {
          left join event_participants cp on cp.event_id = r.event_id and cp.attendee_id = c.id
         where r.event_id = $1 and r.status = 'accepted'
           and (r.requester_id = $2 or r.recipient_id = $2)
+          -- Someone removed from the event no longer has their contact shown.
+          and cp.revoked_at is null
         order by r.responded_at desc`,
       [eventId, participantId]
     );

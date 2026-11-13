@@ -26,8 +26,8 @@ const POSITIVE_INTEGERS = [
 ];
 
 const ALLOWED: Record<string, string[]> = {
-  DATABASE_SSL: ["disable", "require"],
-  EMBEDDING_PROVIDER: ["gemini", "local"],
+  DATABASE_SSL: ["disable", "require", "verify"],
+  EMBEDDING_PROVIDER: ["gemini", "local", "hash"],
   EMAIL_DEV_FALLBACK: ["true", "false"],
   TRUSTED_PROXY_HOPS: ["0", "1", "2", "3"],
 };
@@ -61,6 +61,26 @@ export function checkEnv(role: EnvRole, env: Env = process.env): string[] {
   const databaseUrl = value("DATABASE_URL");
   if (databaseUrl && !/^postgres(ql)?:\/\//.test(databaseUrl)) {
     problems.push("DATABASE_URL must start with postgres:// or postgresql://.");
+  }
+
+  // Production must not quietly fall back to unverified or plain transport.
+  // Local hosts are exempt so the docker-compose stack still runs as production.
+  if (value("NODE_ENV") === "production") {
+    if (value("EMBEDDING_PROVIDER") === "hash") {
+      problems.push("EMBEDDING_PROVIDER=hash is for capacity tests only and cannot run in production.");
+    }
+    if (databaseUrl && !isLocalHost(databaseUrl)) {
+      if (value("DATABASE_SSL") !== "verify") {
+        problems.push("DATABASE_SSL must be verify in production, so the database certificate is checked.");
+      } else if (!value("DATABASE_CA_CERT") && !value("DATABASE_CA_CERT_FILE")) {
+        problems.push("DATABASE_SSL=verify needs DATABASE_CA_CERT or DATABASE_CA_CERT_FILE (the RDS CA bundle).");
+      }
+    }
+    const base = value("APP_BASE_URL");
+    if (role === "web" && !base) problems.push("APP_BASE_URL is required in production.");
+    if (role === "web" && base && isHttpUrl(base) && !isLocalHost(base) && new URL(base).protocol !== "https:") {
+      problems.push(`APP_BASE_URL must use https in production, got "${base}".`);
+    }
   }
 
   if (role === "web") {
@@ -107,6 +127,14 @@ export function assertEnv(role: EnvRole, env: Env = process.env): void {
 function isSenderAddress(raw: string): boolean {
   const address = raw.match(/^[^<>]*<([^<>]+)>$/)?.[1] ?? raw;
   return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address.trim());
+}
+
+function isLocalHost(raw: string): boolean {
+  try {
+    return ["localhost", "127.0.0.1", "postgres"].includes(new URL(raw).hostname);
+  } catch {
+    return false;
+  }
 }
 
 function isHttpUrl(raw: string): boolean {
