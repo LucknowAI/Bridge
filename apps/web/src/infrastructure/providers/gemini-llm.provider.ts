@@ -2,11 +2,17 @@ import type { LlmProvider } from "../../application/ports/llm-provider";
 import type { MatchCandidate } from "../../domain/matching/match-strategy";
 import type { ParticipantProfile } from "../../domain/participant/participant.entity";
 
+const DEFAULT_MODEL = "gemini-3.8-flash";
+
 export class GeminiLlmProvider implements LlmProvider {
+  get id(): string {
+    return `gemini:${process.env.GEMINI_LLM_MODEL || DEFAULT_MODEL}`;
+  }
+
   async rerank(viewer: ParticipantProfile, candidates: MatchCandidate[]): Promise<MatchCandidate[]> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return candidates;
-    const model = process.env.GEMINI_LLM_MODEL || "gemini-3.8-flash";
+    const model = process.env.GEMINI_LLM_MODEL || DEFAULT_MODEL;
     const input = candidates.map(({ participant, score, mutualInterest }) => ({
       id: participant.attendeeId,
       name: participant.name,

@@ -12,7 +12,7 @@ export async function requestIntro(
     dependencies.participants.findProfile(input.eventId, input.requesterId),
     dependencies.participants.findProfile(input.eventId, input.recipientId),
   ]);
-  if (!requester || !recipient || !recipient.visible) throw new Error("This participant is unavailable");
+  if (!requester || !recipient || !recipient.visible || !recipient.profileComplete) throw new Error("This participant is unavailable");
   const intro = await dependencies.intros.create(input);
   if (recipient.email && dependencies.notifications) {
     await dependencies.notifications.introRequested({
