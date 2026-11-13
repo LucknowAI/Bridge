@@ -37,7 +37,7 @@ describeDb("connection privacy", () => {
   it("keeps a declined request declined", async () => {
     const declined = await intros.create({ eventId, requesterId: ids.ann, recipientId: ids.bo });
     await intros.respond(eventId, declined.id, ids.bo, "declined");
-    await expect(intros.create({ eventId, requesterId: ids.ann, recipientId: ids.bo })).rejects.toThrow(/already exists/);
+    await expect(intros.create({ eventId, requesterId: ids.ann, recipientId: ids.bo })).rejects.toThrow(/declined an earlier request/);
     expect((await intros.findById(eventId, declined.id))?.status).toBe("declined");
     expect(await intros.findBetween(eventId, ids.bo, ids.ann)).toHaveLength(1);
   });

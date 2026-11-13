@@ -255,6 +255,7 @@ export async function setRevoked(eventId: string, attendeeId: string, revoked: b
   // Explanations written about or for a removed attendee are not kept.
   if (revoked && rowCount) {
     await query(`delete from pair_explanations where event_id = $1 and (viewer_id = $2 or candidate_id = $2)`, [eventId, attendeeId]);
+    await query(`delete from rerank_orders where event_id = $1 and (viewer_id = $2 or $2::uuid = any(candidate_ids))`, [eventId, attendeeId]);
   }
   return (rowCount ?? 0) > 0;
 }

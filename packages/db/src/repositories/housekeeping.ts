@@ -29,6 +29,7 @@ export async function sweepExpired(): Promise<SweepResult> {
   );
   const cache = await query(`delete from retrieval_cache where expires_at < now()`);
   const explanations = await query(`delete from pair_explanations where expires_at < now()`);
+  await query(`delete from rerank_orders where expires_at < now()`);
   await query(`delete from cache_locks where expires_at < now()`);
   await query(`delete from model_usage where created_at < now() - make_interval(days => $1)`, [USAGE_RETENTION_DAYS]);
   await query(`delete from notification_outbox where status = 'sent' and sent_at < now() - make_interval(days => $1)`, [SENT_RETENTION_DAYS]);
