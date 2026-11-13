@@ -46,7 +46,7 @@ async function saveProfile(eventSlug: string, formData: FormData) {
     yearsOfExperience: parseYears(formData.get("yearsOfExperience")),
     mostImpressiveBuild: nullable(formData.get("mostImpressiveBuild")),
     visible: formData.get("visible") === "on",
-  }, { participants: container.participants, enqueueMatching: container.enqueueEmbedding }, readProfileForm(event.form_config));
+  }, { participants: container.participants }, readProfileForm(event.form_config));
 }
 
 export async function signOutCurrentUser() {

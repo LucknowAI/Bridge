@@ -71,10 +71,14 @@ function searchPipeline(candidates: ParticipantProfile[], viewer: ParticipantPro
     listCandidates: vi.fn(async () => candidates),
     findCandidatesByIds: vi.fn(async (_event: string, ids: string[]) => candidates.filter((c) => ids.includes(c.attendeeId))),
     setEmbedding: vi.fn(),
+    corpusRevision: vi.fn(async () => 1),
   } as unknown as ParticipantRepository;
-  const cache = { get: vi.fn(async () => cached), set: vi.fn() };
+  const cache = {
+    get: vi.fn(async () => cached), set: vi.fn(async () => {}), getVector: vi.fn(async () => null), setVector: vi.fn(async () => {}),
+    acquire: vi.fn(async () => "token"), release: vi.fn(async () => {}),
+  };
   const matches = { save: vi.fn(), listForParticipant: vi.fn() };
-  const pipeline = new MatchingPipeline(participants, matches, { embed: vi.fn(async () => null) }, null, cache);
+  const pipeline = new MatchingPipeline(participants, matches, { id: "test-embeddings", embed: vi.fn(async () => null) }, null, cache);
   return { pipeline, participants, cache, matches };
 }
 

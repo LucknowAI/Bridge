@@ -1,4 +1,4 @@
-import { query } from "@match-maker/db";
+import { matchingJobs, query, transaction } from "@match-maker/db";
 import { lexicalTsQuery, type SearchFilters } from "../../domain/matching/search-query";
 import type { ParticipantRepository } from "../../application/ports/participant-repository";
 import { Intent } from "../../domain/participant/intent";
@@ -23,6 +23,8 @@ interface ProfileRow {
   embedding: string | number[] | null;
   profile_updated_at?: Date | null;
   profile_form_version?: number;
+  profile_revision?: number;
+  embedding_model?: string | null;
 }
 
 const PROFILE_COLUMNS = `p.event_id, a.id as attendee_id, a.name,
@@ -33,7 +35,7 @@ const PROFILE_COLUMNS = `p.event_id, a.id as attendee_id, a.name,
   coalesce(p.years_of_experience, a.years_of_experience) as years_of_experience,
   coalesce(p.most_impressive_build, a.most_impressive_build) as most_impressive_build,
   p.intent, p.interests,
-  p.venue_zone, p.visible, p.embedding::text as embedding, p.profile_updated_at, p.profile_form_version`;
+  p.venue_zone, p.visible, p.embedding::text as embedding, p.profile_updated_at, p.profile_form_version, p.profile_revision::int as profile_revision, p.embedding_model`;
 const PROFILE_FROM = `from event_participants p
   join registered_attendees a on a.id = p.attendee_id`;
 /**
@@ -57,23 +59,32 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     return rows[0] ? mapProfile(rows[0]) : null;
   }
 
+  /**
+   * Saves the profile and queues its embedding in one transaction, so a crash
+   * cannot keep the change while losing the work that reflects it.
+   */
   async saveProfile(input: ParticipantProfileInput): Promise<ParticipantProfile> {
-    const { rowCount } = await query(
-      `update event_participants set
-         intent = $3, interests = $4, venue_zone = $5,
-         about_me = $6, designation = $7, domain = $8,
-         self_description = $9, years_of_experience = $10,
-         most_impressive_build = $11, profile_form_version = $12, visible = coalesce($13, visible),
-         embedding = null, profile_updated_at = now(), updated_at = now()
-       where event_id = $1 and attendee_id = $2`,
-      [input.eventId, input.attendeeId, input.intent, input.interests, input.venueZone,
-        input.aboutMe, input.designation, input.domain, input.selfDescription,
-        input.yearsOfExperience, input.mostImpressiveBuild, input.formVersion ?? 0, input.visible ?? null]
-    );
-    if (!rowCount) throw new Error("This attendee is not on the event roster");
+    await transaction(async (client) => {
+      const { rows: [updated] } = await client.query<{ profile_revision: string }>(
+        `update event_participants set
+           intent = $3, interests = $4, venue_zone = $5,
+           about_me = $6, designation = $7, domain = $8,
+           self_description = $9, years_of_experience = $10,
+           most_impressive_build = $11, profile_form_version = $12, visible = coalesce($13, visible),
+           embedding = null, profile_updated_at = now(), updated_at = now(), profile_revision = profile_revision + 1
+         where event_id = $1 and attendee_id = $2 and revoked_at is null
+         returning profile_revision`,
+        [input.eventId, input.attendeeId, input.intent, input.interests, input.venueZone,
+          input.aboutMe, input.designation, input.domain, input.selfDescription,
+          input.yearsOfExperience, input.mostImpressiveBuild, input.formVersion ?? 0, input.visible ?? null]
+      );
+      if (!updated) throw new Error("This attendee is not on the event roster");
+      await matchingJobs.enqueue(input.eventId, input.attendeeId, "embed", { revision: Number(updated.profile_revision) }, client);
+    });
     if (input.visible === false) {
       // Hidden profiles are not explained to others any more.
       await query(`delete from pair_explanations where event_id = $1 and candidate_id = $2`, [input.eventId, input.attendeeId]);
+      await query(`delete from rerank_orders where event_id = $1 and $2::uuid = any(candidate_ids)`, [input.eventId, input.attendeeId]);
     }
     const saved = await this.findProfile(input.eventId, input.attendeeId);
     if (!saved) throw new Error("Could not load the saved profile");
@@ -86,6 +97,9 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     embedding?: number[] | null;
     terms?: string[];
     filters?: SearchFilters;
+    welcomedIntents?: string[] | null;
+    /** The model that produced `embedding`; only candidates embedded by it are ranked by vector. */
+    embeddingModel?: string | null;
     limit?: number;
   }): Promise<ParticipantProfile[]> {
     const vector = toVector(input.embedding ?? null);
@@ -97,15 +111,21 @@ export class PostgresParticipantRepository implements ParticipantRepository {
           and ($5::text is null or p.intent = $5)
           and ($6::text is null or lower(p.domain) = lower($6))
           and ($7::text is null or ${SEARCH_DOCUMENT} @@ to_tsquery('simple', $7))
-        order by case when $3::vector is not null and p.embedding is not null then 0 else 1 end,
-                 p.embedding <=> $3::vector nulls last,
+          and ($9::text[] is null or p.intent = any($9::text[]))
+        order by case when $3::vector is not null and p.embedding is not null and p.embedding_model is not distinct from $8 then 0 else 1 end,
+                 case when p.embedding_model is not distinct from $8 then p.embedding <=> $3::vector end nulls last,
                  case when $7::text is null then 0 else ts_rank(${SEARCH_DOCUMENT}, to_tsquery('simple', $7)) end desc,
                  a.name asc
         limit $4`,
       [input.eventId, input.excludeAttendeeId, vector, Math.max(1, Math.min(100, input.limit ?? 50)),
-        input.filters?.intent ?? null, input.filters?.domain ?? null, tsQuery]
+        input.filters?.intent ?? null, input.filters?.domain ?? null, tsQuery, input.embeddingModel ?? null, input.welcomedIntents ?? null]
     );
     return rows.map(mapProfile);
+  }
+
+  async corpusRevision(eventId: string): Promise<number> {
+    const { rows } = await query<{ corpus_revision: string }>(`select corpus_revision from events where id = $1`, [eventId]);
+    return Number(rows[0]?.corpus_revision ?? 0);
   }
 
   async listDomains(eventId: string): Promise<string[]> {
@@ -130,12 +150,20 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     return rows.map(mapProfile);
   }
 
-  async setEmbedding(eventId: string, attendeeId: string, embedding: number[]): Promise<void> {
-    const vector = toVector(embedding);
+  async setEmbeddingAt(eventId: string, attendeeId: string, embedding: number[], revision: number, model: string): Promise<boolean> {
+    const { rowCount } = await query(
+      `update event_participants set embedding = $3::vector, embedding_model = $5, updated_at = now()
+        where event_id = $1 and attendee_id = $2 and profile_revision = $4`,
+      [eventId, attendeeId, toVector(embedding), revision, model]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+
+  async setEmbedding(eventId: string, attendeeId: string, embedding: number[], model: string): Promise<void> {
     await query(
-      `update event_participants set embedding = $3::vector, updated_at = now()
+      `update event_participants set embedding = $3::vector, embedding_model = $4, updated_at = now()
         where event_id = $1 and attendee_id = $2`,
-      [eventId, attendeeId, vector]
+      [eventId, attendeeId, toVector(embedding), model]
     );
   }
 
@@ -181,6 +209,8 @@ function mapProfile(row: ProfileRow): ParticipantProfile {
     visible: row.visible,
     profileComplete: Boolean(row.profile_updated_at),
     formVersion: row.profile_form_version ?? 0,
+    revision: row.profile_revision ?? 0,
+    embeddingModel: row.embedding_model ?? null,
     profileRevision: row.profile_updated_at ? new Date(row.profile_updated_at).toISOString() : null,
     embedding: parseEmbedding(row.embedding),
   };

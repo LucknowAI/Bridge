@@ -31,11 +31,16 @@ describe("matching pipeline viewer", () => {
     const participants = {
       findProfile: vi.fn(async () => viewer),
       listCandidates: vi.fn(async () => [eligible, hidden, incomplete]),
+      findCandidatesByIds: vi.fn(async (_event: string, ids: string[]) => [eligible, hidden, incomplete].filter((p) => ids.includes(p.attendeeId))),
+      corpusRevision: vi.fn(async () => 1),
       setEmbedding: vi.fn(),
     } as unknown as ParticipantRepository;
     const matches = { save: vi.fn(), listForParticipant: vi.fn() } satisfies MatchRepository;
-    const embeddings = { embed: vi.fn(async () => null) };
-    const cache = { get: vi.fn(), set: vi.fn() };
+    const embeddings = { id: "test-embeddings", embed: vi.fn(async () => null) };
+    const cache = {
+      get: vi.fn(async () => null), set: vi.fn(async () => {}), getVector: vi.fn(async () => null), setVector: vi.fn(async () => {}),
+      acquire: vi.fn(async () => "token"), release: vi.fn(async () => {}),
+    };
     return { pipeline: new MatchingPipeline(participants, matches, embeddings, null, cache), matches };
   }
   const run = (pipeline: MatchingPipeline, mode: "profile" | "search") =>
