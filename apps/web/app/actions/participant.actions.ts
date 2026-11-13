@@ -5,6 +5,7 @@ import { getContainer } from "../../src/composition/container";
 import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { Intent } from "../../src/domain/participant/intent";
 import { ValidationError } from "../../src/domain/shared/validation";
+import { readProfileForm } from "../../src/domain/participant/profile-form";
 import { clearSession, endIdentityProviderSession, getSession } from "../../lib/session";
 import { runFormAction, type FormState } from "../../lib/form-state";
 import { redirect } from "next/navigation";
@@ -44,7 +45,8 @@ async function saveProfile(eventSlug: string, formData: FormData) {
     selfDescription: nullable(formData.get("selfDescription")),
     yearsOfExperience: parseYears(formData.get("yearsOfExperience")),
     mostImpressiveBuild: nullable(formData.get("mostImpressiveBuild")),
-  }, { participants: container.participants, enqueueMatching: container.enqueueEmbedding });
+    visible: formData.get("visible") === "on",
+  }, { participants: container.participants }, readProfileForm(event.form_config));
 }
 
 export async function signOutCurrentUser() {

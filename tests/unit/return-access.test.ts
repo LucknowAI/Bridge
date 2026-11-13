@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   findByEventSlug: vi.fn(), findBySlug: vi.fn(), isParticipant: vi.fn(), isOrganizer: vi.fn(), hasOrganizationAccess: vi.fn(),
+  listForOrganization: vi.fn(),
 }));
 const accountState = vi.hoisted(() => vi.fn());
 vi.mock("@match-maker/db", () => ({ events: mocks, attendees: { accountState } }));
@@ -29,6 +30,13 @@ describe("canReturnToPath", () => {
       expect(mocks.hasOrganizationAccess).toHaveBeenCalledWith("acme", "member");
       expect(mocks.findBySlug).not.toHaveBeenCalled();
     });
+
+  it("lets an organizer of one event open the event list, but not create events", async () => {
+    mocks.hasOrganizationAccess.mockResolvedValue(false);
+    mocks.listForOrganization.mockResolvedValue([{ id: "event" }]);
+    await expect(canReturnToPath("/orgs/acme/events", "helper")).resolves.toBe(true);
+    await expect(canReturnToPath("/orgs/acme/events/new", "helper")).resolves.toBe(false);
+  });
 
   it("refuses someone outside the organization", async () => {
     mocks.hasOrganizationAccess.mockResolvedValue(false);

@@ -1,7 +1,15 @@
 import type { EventRepository, RosterAttendeeInput } from "../ports/event-repository";
+import type { AuditLog } from "../ports/audit-log";
 import { slugify } from "../../domain/shared/value-objects";
 import { Intent } from "../../domain/participant/intent";
 import { boundedItems, boundedText, LIMITS, ValidationError } from "../../domain/shared/validation";
+import { assertOrganizerCan, type OrganizerAction } from "../../domain/shared/organizer-permissions";
+import { buildProfileForm, readProfileForm, type ProfileFieldKey, type ProfileFieldSetting } from "../../domain/participant/profile-form";
+
+/** Throws unless the attendee's role on the event allows the action. */
+export async function authorizeOrganizer(events: EventRepository, eventId: string, attendeeId: string, action: OrganizerAction): Promise<void> {
+  assertOrganizerCan(await events.organizerRoles(eventId, attendeeId), action);
+}
 
 export async function createEvent(input: { organizationSlug: string; organizerId: string; name: string; slug?: string; description?: string }, events: EventRepository) {
   const organization = await events.findOrganization(input.organizationSlug);
@@ -22,8 +30,8 @@ export async function updateEvent(input: {
   status?: "draft" | "open" | "closed";
   intents?: string[];
   zones?: string[];
-}, events: EventRepository) {
-  if (!(await events.isOrganizer(input.eventId, input.organizerId))) throw new Error("You are not an organizer for this event");
+}, events: EventRepository, audit?: AuditLog) {
+  await authorizeOrganizer(events, input.eventId, input.organizerId, "configure");
   const updated = await events.update({
     ...input,
     name: input.name === undefined ? undefined : eventName(input.name)!,
@@ -34,17 +42,21 @@ export async function updateEvent(input: {
       : boundedItems(input.zones, "zones", "venue zones", { count: LIMITS.zoneCount, length: LIMITS.zoneLength }),
   });
   if (!updated) throw new Error("Event not found");
+  const fields = Object.keys(input).filter((key) => !["eventId", "organizerId"].includes(key) && input[key as keyof typeof input] !== undefined);
+  await audit?.record({ eventId: input.eventId, actorId: input.organizerId, action: "event.updated", details: { fields, status: updated.status } });
   return updated;
 }
 
-export async function importEventRoster(input: { eventId: string; organizerId: string; records: RosterAttendeeInput[] }, events: EventRepository) {
-  if (!(await events.isOrganizer(input.eventId, input.organizerId))) throw new Error("You are not an organizer for this event");
-  if (!input.records.length) return { upserted: 0, attached: 0 };
-  return events.importRoster(input.eventId, input.records);
+export async function importEventRoster(input: { eventId: string; organizerId: string; records: RosterAttendeeInput[] }, events: EventRepository, audit?: AuditLog) {
+  await authorizeOrganizer(events, input.eventId, input.organizerId, "importRoster");
+  if (!input.records.length) return { created: 0, attached: 0, alreadyOnRoster: 0, keptExisting: 0, phoneConflicts: 0 };
+  const result = await events.importRoster(input.eventId, input.records);
+  await audit?.record({ eventId: input.eventId, actorId: input.organizerId, action: "roster.imported", details: { rows: input.records.length, ...result } });
+  return result;
 }
 
 export async function queueEventMatches(input: { eventId: string; organizerId: string }, events: EventRepository, enqueue: (eventId: string, participantId: string) => Promise<void>) {
-  if (!(await events.isOrganizer(input.eventId, input.organizerId))) throw new Error("You are not an organizer for this event");
+  await authorizeOrganizer(events, input.eventId, input.organizerId, "computeMatches");
   const participants = await events.participantIds(input.eventId);
   for (const participantId of participants) await enqueue(input.eventId, participantId);
   return participants.length;
@@ -61,4 +73,18 @@ function eventIntents(values: string[]) {
     throw new ValidationError("intents", `Use supported intents separated by commas: ${Object.values(Intent).join(", ")}`);
   }
   return intents;
+}
+
+/** Saves the organizer's profile form settings as a new form version. */
+export async function configureProfileForm(
+  input: { eventId: string; organizerId: string; fields: Record<ProfileFieldKey, ProfileFieldSetting>; currentConfig: unknown },
+  events: EventRepository,
+  audit?: AuditLog
+) {
+  await authorizeOrganizer(events, input.eventId, input.organizerId, "configure");
+  const form = buildProfileForm(input.fields, readProfileForm(input.currentConfig));
+  const updated = await events.update({ eventId: input.eventId, organizerId: input.organizerId, formConfig: { ...form } });
+  if (!updated) throw new Error("Event not found");
+  await audit?.record({ eventId: input.eventId, actorId: input.organizerId, action: "profile_form.updated", details: { version: form.version } });
+  return form;
 }

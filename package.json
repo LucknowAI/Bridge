@@ -19,6 +19,7 @@
     "typecheck": "turbo run typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "db:migrate": "tsx packages/db/src/migrate.ts",
     "db:seed": "tsx packages/db/src/seed.ts",
     "db:import": "tsx tools/import-attendees.ts",
@@ -31,9 +32,18 @@
     "keycloak:sync": "tsx tools/sync-keycloak.ts",
     "account:disable": "tsx tools/manage-account.ts disable",
     "account:enable": "tsx tools/manage-account.ts enable",
-    "account:revoke-sessions": "tsx tools/manage-account.ts revoke-sessions"
+    "account:revoke-sessions": "tsx tools/manage-account.ts revoke-sessions",
+    "account:erase": "tsx tools/manage-account.ts erase",
+    "jobs:failed": "tsx tools/manage-jobs.ts failed",
+    "jobs:retry": "tsx tools/manage-jobs.ts retry",
+    "models:usage": "tsx tools/model-usage.ts",
+    "capacity:check": "tsx tools/capacity-check.ts",
+    "db:verify": "tsx tools/verify-database.ts",
+    "db:restore-rehearsal": "tsx tools/restore-rehearsal.ts",
+    "db:check-migrations": "tsx tools/check-migrations.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.0.2",

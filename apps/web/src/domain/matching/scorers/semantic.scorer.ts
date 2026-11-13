@@ -1,12 +1,15 @@
+import { SCORING_CONFIG } from "../scoring-config";
 import type { ParticipantProfile } from "../../participant/participant.entity";
 import { cosineSimilarity, tokenize, type Scorer } from "./scorer";
 
 export class SemanticScorer implements Scorer {
   readonly name = "semantic";
-  readonly weight = 0.3;
+  readonly weight = SCORING_CONFIG.weights.semantic;
 
   score(viewer: ParticipantProfile, candidate: ParticipantProfile): number {
-    const vectorScore = cosineSimilarity(viewer.embedding, candidate.embedding);
+    // Vectors from different models are not comparable; use the text fallback instead.
+    const sameSpace = viewer.embeddingModel === undefined || candidate.embeddingModel === undefined || viewer.embeddingModel === candidate.embeddingModel;
+    const vectorScore = sameSpace ? cosineSimilarity(viewer.embedding, candidate.embedding) : 0;
     if (vectorScore > 0) return vectorScore;
     const left = tokenize([viewer.aboutMe, viewer.selfDescription, viewer.mostImpressiveBuild].join(" "));
     const right = tokenize([candidate.aboutMe, candidate.selfDescription, candidate.mostImpressiveBuild].join(" "));
