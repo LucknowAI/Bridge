@@ -1,15 +1,17 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { createEventAction } from "../../../../../actions/organizer.actions";
 import { requireOrganizationMember } from "@/src/lib/auth";
 import { NewEventForm } from "@/components/organizer/EventForms";
 
 export default async function NewEventPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
-  const { organization, container } = await requireOrganizationMember(orgSlug, `/orgs/${orgSlug}/events/new`);
-  const existing = await container.events.listForOrganization(orgSlug);
+  const { session, organization, container } = await requireOrganizationMember(orgSlug, `/orgs/${orgSlug}/events/new`);
+  const existing = await container.events.listForOrganization(orgSlug, session.attendeeId);
   const create = createEventAction.bind(null, orgSlug);
   return <main style={shell}>
     <Link href={`/orgs/${orgSlug}/events/${existing[0]?.slug ?? "new"}`}>← Organizer</Link>
+    <nav><Link href={`/orgs/${orgSlug}/events`}>← Events</Link><SignOutButton /></nav>
     <h1>Create an event</h1>
     <p>Set up a roster, participant profile, and matching flow for {organization.name}.</p>
     <NewEventForm action={create} />

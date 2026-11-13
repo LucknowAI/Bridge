@@ -1,15 +1,18 @@
 import type { LlmProvider } from "../../application/ports/llm-provider";
+import type { ProviderCallOptions } from "../../application/ports/embedding-provider";
 import type { MatchCandidate } from "../../domain/matching/match-strategy";
 import type { ParticipantProfile } from "../../domain/participant/participant.entity";
 
 const DEFAULT_MODEL = "gemini-3.8-flash";
 
 export class GeminiLlmProvider implements LlmProvider {
+  readonly promptVersion = "p1";
+
   get id(): string {
     return `gemini:${process.env.GEMINI_LLM_MODEL || DEFAULT_MODEL}`;
   }
 
-  async rerank(viewer: ParticipantProfile, candidates: MatchCandidate[]): Promise<MatchCandidate[]> {
+  async rerank(viewer: ParticipantProfile, candidates: MatchCandidate[], options: ProviderCallOptions = {}): Promise<MatchCandidate[]> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return candidates;
     const model = process.env.GEMINI_LLM_MODEL || DEFAULT_MODEL;
@@ -39,7 +42,7 @@ export class GeminiLlmProvider implements LlmProvider {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: "application/json" },
       }),
-      signal: AbortSignal.timeout(20_000),
+      signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
     });
     if (!response.ok) throw new Error(`Gemini rerank failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
     const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
