@@ -305,3 +305,20 @@ variable "enable_container_insights" {
   type        = bool
   default     = true
 }
+
+variable "session_secret_active" {
+  description = "Which session-secret slot seals new cookies (a or b); the other is still accepted. Flip it, with -replace of the newly active slot, to rotate without signing anyone out."
+  type        = string
+  default     = "a"
+
+  validation {
+    condition     = contains(["a", "b"], var.session_secret_active)
+    error_message = "session_secret_active must be \"a\" or \"b\"."
+  }
+}
+
+variable "image_promotion_source" {
+  description = "Stack whose images production may promote unchanged, e.g. \"match-maker-staging\" (same account and region). Empty disables promotion."
+  type        = string
+  default     = ""
+}

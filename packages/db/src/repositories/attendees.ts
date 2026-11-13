@@ -105,6 +105,7 @@ export async function erase(email: string): Promise<string | null> {
   const id = rows[0]?.id;
   if (!id) return null;
   await query(`delete from pair_explanations where viewer_id = $1 or candidate_id = $1`, [id]);
+  await query(`delete from rerank_orders where viewer_id = $1 or $1::uuid = any(candidate_ids)`, [id]);
   await query(`delete from login_challenges where email = $1`, [normalized]);
   await query(`delete from registered_attendees where id = $1`, [id]);
   return id;
