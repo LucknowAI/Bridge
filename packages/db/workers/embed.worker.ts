@@ -3,8 +3,9 @@ import { getContainer } from "../../../apps/web/src/composition/container";
 import { profileText } from "../../../apps/web/src/domain/participant/participant.entity";
 import { eventAllows } from "../../../apps/web/src/domain/shared/event-lifecycle";
 
-export async function processEmbedJob(): Promise<boolean> {
-  const job = await matchingJobs.claim("embed");
+/** `onlyEventId` limits work to one event (tests). */
+export async function processEmbedJob(onlyEventId: string | null = null): Promise<boolean> {
+  const job = await matchingJobs.claim("embed", onlyEventId);
   if (!job) return false;
   try {
     const status = await events.statusOf(job.event_id);
@@ -21,7 +22,7 @@ export async function processEmbedJob(): Promise<boolean> {
       return true;
     }
     const embedding = await container.embeddings.embed(profileText(profile), "profile");
-    if (embedding && !(await container.participants.setEmbeddingAt(job.event_id, job.participant_id, embedding, job.revision))) {
+    if (embedding && !(await container.participants.setEmbeddingAt(job.event_id, job.participant_id, embedding, job.revision, container.embeddings.id))) {
       await matchingJobs.complete(job.id);
       return true;
     }

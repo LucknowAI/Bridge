@@ -8,8 +8,9 @@ import { DEFAULT_MATCH_LIMIT } from "../../../apps/web/src/domain/matching/match
 /** Seconds to wait before refreshing affected people, so bursts coalesce. */
 const REFRESH_DELAY_SECONDS = Number(process.env.MATCH_REFRESH_DELAY_SECONDS ?? 120);
 
-export async function processMatchJob(): Promise<boolean> {
-  const job = await matchingJobs.claim("match");
+/** `onlyEventId` limits work to one event (tests). */
+export async function processMatchJob(onlyEventId: string | null = null): Promise<boolean> {
+  const job = await matchingJobs.claim("match", onlyEventId);
   if (!job) return false;
   try {
     const status = await events.statusOf(job.event_id);
