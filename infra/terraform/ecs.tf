@@ -211,6 +211,7 @@ resource "aws_ecs_task_definition" "web" {
       environment = [
         { name = "NODE_ENV", value = "production" },
         { name = "PORT", value = "3000" },
+        { name = "METRICS_NAMESPACE", value = local.metrics_namespace },
         { name = "APP_BASE_URL", value = local.app_base_url },
         { name = "DEFAULT_EVENT_SLUG", value = var.default_event_slug },
         # One ALB appends the client address to X-Forwarded-For.
@@ -230,6 +231,8 @@ resource "aws_ecs_task_definition" "web" {
       secrets = [
         { name = "DATABASE_URL", valueFrom = local.secret_ref.DATABASE_URL },
         { name = "SESSION_SECRET", valueFrom = local.secret_ref.SESSION_SECRET },
+        { name = "SESSION_SECRET_PREVIOUS", valueFrom = local.secret_ref.SESSION_SECRET_PREVIOUS },
+        { name = "OTP_PEPPER", valueFrom = local.secret_ref.OTP_PEPPER },
         { name = "KEYCLOAK_CLIENT_SECRET", valueFrom = local.secret_ref.KEYCLOAK_CLIENT_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.secret_ref.RESEND_API_KEY },
         # Only its presence is read: it switches the Google sign-in option on.
@@ -327,7 +330,9 @@ resource "aws_ecs_task_definition" "keycloak" {
         # Tokens must be issued with the hostname the browser uses, or `iss`
         # will not match what the app verifies.
         { name = "KC_HOSTNAME", value = local.keycloak_public_origin },
-        { name = "KC_HOSTNAME_STRICT", value = "false" },
+        # Supported shared-domain setup: a fixed public hostname, while the app's
+        # back-channel calls over Cloud Map keep their internal URLs.
+        { name = "KC_HOSTNAME_BACKCHANNEL_DYNAMIC", value = "true" },
         # TLS terminates at the ALB, so Keycloak speaks HTTP but must trust the
         # X-Forwarded-* headers to build correct absolute URLs.
         { name = "KC_PROXY_HEADERS", value = "xforwarded" },
@@ -475,6 +480,7 @@ resource "aws_ecs_task_definition" "worker" {
       essential = true
       environment = [
         { name = "NODE_ENV", value = "production" },
+        { name = "METRICS_NAMESPACE", value = local.metrics_namespace },
         { name = "DATABASE_SSL", value = "verify" },
         { name = "DATABASE_CA_CERT_FILE", value = local.database_ca_file },
         { name = "GEMINI_LLM_MODEL", value = "gemini-3.8-flash" },

@@ -30,5 +30,8 @@ ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pe
 # environment (client secret, app URL, Google credentials).
 COPY keycloak/realm-export.json /opt/keycloak/data/import/realm-export.json
 
+# Site-styled login theme; selected per realm by `npm run keycloak:sync`.
+COPY keycloak/themes/mr-bridge /opt/keycloak/themes/mr-bridge
+
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
 CMD ["start", "--optimized", "--import-realm"]

@@ -34,6 +34,20 @@ function deriveKey(secret: string): Uint8Array {
   return new Uint8Array(createHash("sha256").update(secret).digest());
 }
 
+/** Decrypts with the current secret, then with each previous one (rotation). */
+async function decrypt(value: string, options: { issuer: string; audience: string }) {
+  const config = getSessionConfig();
+  let failure: unknown;
+  for (const secret of [config.secret, ...config.previousSecrets]) {
+    try {
+      return await jwtDecrypt(value, deriveKey(secret), options);
+    } catch (error) {
+      failure = error;
+    }
+  }
+  throw failure;
+}
+
 /** Encrypt a session into a compact JWE suitable for a cookie value. */
 export async function sealSession(
   session: Omit<Session, "iat">
@@ -52,8 +66,7 @@ export async function sealSession(
 export async function unsealSession(value: string): Promise<Session | null> {
   if (!value) return null;
   try {
-    const config = getSessionConfig();
-    const { payload } = await jwtDecrypt(value, deriveKey(config.secret), {
+    const { payload } = await decrypt(value, {
       issuer: ISSUER,
       audience: AUDIENCE,
     });
@@ -125,8 +138,7 @@ export async function unsealOAuthState(
 ): Promise<OAuthState | null> {
   if (!value) return null;
   try {
-    const config = getSessionConfig();
-    const { payload } = await jwtDecrypt(value, deriveKey(config.secret), {
+    const { payload } = await decrypt(value, {
       issuer: ISSUER,
       audience: "match-maker-oauth",
     });

@@ -5,6 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Where to deploy. Staging is a separate Terraform stack (environment = staging)."
+        type: choice
+        options: [production, staging]
+        default: production
+      promote_tag:
+        description: "Promote: copy this tag's staging images to production unchanged, then migrate and roll out (production only)"
+        type: string
+        default: ""
       deploy_keycloak:
         description: "Also rebuild and roll out Keycloak"
         type: boolean
@@ -16,7 +25,7 @@ on:
 
 # Never let two deploys race for the same service.
 concurrency:
-  group: deploy-production
+  group: deploy-${{ inputs.environment || 'production' }}
   cancel-in-progress: false
 
 permissions:
@@ -24,29 +33,59 @@ permissions:
   id-token: write
   contents: read
 
+# Staging names follow the Terraform stack (match-maker-staging-*) and never
+# fall back to production's repository variables. Each job that touches AWS
+# runs in the GitHub environment of the target, so its role, subnets and URL
+# come from that environment's secrets and variables.
 env:
+  TARGET: ${{ inputs.environment || 'production' }}
+  STACK: ${{ inputs.environment == 'staging' && 'match-maker-staging' || 'match-maker-prod' }}
   AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
-  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'match-maker-prod-cluster' }}
-  ECS_WEB_SERVICE: ${{ vars.ECS_WEB_SERVICE || 'match-maker-prod-web' }}
-  ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE || 'match-maker-prod-worker' }}
-  ECS_KEYCLOAK_SERVICE: ${{ vars.ECS_KEYCLOAK_SERVICE || 'match-maker-prod-keycloak' }}
-  MIGRATE_TASK_FAMILY: ${{ vars.MIGRATE_TASK_FAMILY || 'match-maker-prod-migrate' }}
+  ECS_CLUSTER: ${{ inputs.environment == 'staging' && 'match-maker-staging-cluster' || vars.ECS_CLUSTER || 'match-maker-prod-cluster' }}
+  ECS_WEB_SERVICE: ${{ inputs.environment == 'staging' && 'match-maker-staging-web' || vars.ECS_WEB_SERVICE || 'match-maker-prod-web' }}
+  ECS_WORKER_SERVICE: ${{ inputs.environment == 'staging' && 'match-maker-staging-worker' || vars.ECS_WORKER_SERVICE || 'match-maker-prod-worker' }}
+  ECS_KEYCLOAK_SERVICE: ${{ inputs.environment == 'staging' && 'match-maker-staging-keycloak' || vars.ECS_KEYCLOAK_SERVICE || 'match-maker-prod-keycloak' }}
+  MIGRATE_TASK_FAMILY: ${{ inputs.environment == 'staging' && 'match-maker-staging-migrate' || vars.MIGRATE_TASK_FAMILY || 'match-maker-prod-migrate' }}
 
 jobs:
   # Decides what ships: the pushed commit, or an existing tag on rollback.
   plan:
     name: Plan release
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'production' }}
     outputs:
       tag: ${{ steps.plan.outputs.tag }}
       rollback: ${{ steps.plan.outputs.rollback }}
+      promote: ${{ steps.plan.outputs.promote }}
     steps:
+      # A staging run must find staging's own settings, never production's.
+      - name: Check the target environment
+        env:
+          STACK_NAME: ${{ vars.STACK_NAME }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = "staging" ] && [ "${STACK_NAME:-}" != "match-maker-staging" ]; then
+            echo "::error::Set STACK_NAME=match-maker-staging (and staging's AWS secrets) in the GitHub 'staging' environment first."
+            exit 1
+          fi
+
       - id: plan
         env:
           ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+          PROMOTE_TAG: ${{ inputs.promote_tag }}
         run: |
           set -euo pipefail
-          if [ -n "${ROLLBACK_TAG:-}" ]; then
+          echo "promote=false" >> "$GITHUB_OUTPUT"
+          if [ -n "${PROMOTE_TAG:-}" ]; then
+            if [ "$TARGET" != "production" ] || [ -n "${ROLLBACK_TAG:-}" ] || ! [[ "$PROMOTE_TAG" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::promote_tag takes an image tag, targets production, and cannot be combined with rollback_tag."
+              exit 1
+            fi
+            echo "tag=$PROMOTE_TAG" >> "$GITHUB_OUTPUT"
+            echo "rollback=false" >> "$GITHUB_OUTPUT"
+            echo "promote=true" >> "$GITHUB_OUTPUT"
+            echo "Promoting the staging images tagged $PROMOTE_TAG"
+          elif [ -n "${ROLLBACK_TAG:-}" ]; then
             if ! [[ "$ROLLBACK_TAG" =~ ^[0-9a-f]{7,40}$ ]]; then
               echo "::error::rollback_tag must be an image tag (a commit SHA prefix), got '$ROLLBACK_TAG'."
               exit 1
@@ -67,7 +106,8 @@ jobs:
   ci:
     name: Required checks
     needs: [plan]
-    if: needs.plan.outputs.rollback != 'true'
+    # A promoted tag passed these checks when it was built for staging.
+    if: needs.plan.outputs.rollback != 'true' && needs.plan.outputs.promote != 'true'
     uses: ./.github/workflows/ci.yml
     with:
       build_images: false
@@ -76,6 +116,10 @@ jobs:
     name: Build & push images
     runs-on: ubuntu-latest
     needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rollback != 'true' &&
+      (needs.plan.outputs.promote == 'true' || needs.ci.result == 'success')
+    environment: ${{ inputs.environment || 'production' }}
     env:
       TAG: ${{ needs.plan.outputs.tag }}
     steps:
@@ -91,7 +135,24 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # The same image digests that passed staging; nothing is rebuilt. Needs
+      # both stacks' repositories in one AWS account and registry.
+      - name: Copy the staging images
+        if: needs.plan.outputs.promote == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          repos="web migrate worker"
+          if [ "${{ inputs.deploy_keycloak }}" = "true" ]; then repos="$repos keycloak"; fi
+          for repo in $repos; do
+            docker buildx imagetools create \
+              --tag "$REGISTRY/$STACK/$repo:$TAG" --tag "$REGISTRY/$STACK/$repo:latest" \
+              "$REGISTRY/match-maker-staging/$repo:$TAG"
+          done
+
       - name: Build & push web
+        if: needs.plan.outputs.promote != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -99,24 +160,26 @@ jobs:
           push: true
           build-args: APP_VERSION=${{ env.TAG }}
           tags: |
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/web:${{ env.TAG }}
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/web:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/web:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/web:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Build & push migrate
+        if: needs.plan.outputs.promote != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: infra/docker/migrate.Dockerfile
           push: true
           tags: |
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/migrate:${{ env.TAG }}
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/migrate:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/migrate:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/migrate:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Build & push worker
+        if: needs.plan.outputs.promote != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -124,21 +187,21 @@ jobs:
           push: true
           build-args: APP_VERSION=${{ env.TAG }}
           tags: |
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/worker:${{ env.TAG }}
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/worker:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/worker:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/worker:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Build & push Keycloak
-        if: inputs.deploy_keycloak
+        if: inputs.deploy_keycloak && needs.plan.outputs.promote != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: infra/docker/keycloak.Dockerfile
           push: true
           tags: |
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/keycloak:${{ env.TAG }}
-            ${{ steps.ecr.outputs.registry }}/match-maker-prod/keycloak:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/keycloak:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/keycloak:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -146,6 +209,9 @@ jobs:
     name: Run migrations
     runs-on: ubuntu-latest
     needs: [plan, build-and-push]
+    if: >-
+      !cancelled() && needs.plan.outputs.rollback != 'true' && needs.build-and-push.result == 'success'
+    environment: ${{ inputs.environment || 'production' }}
     env:
       TAG: ${{ needs.plan.outputs.tag }}
     steps:
@@ -164,7 +230,7 @@ jobs:
           REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
           aws ecs describe-task-definition --task-definition "$MIGRATE_TASK_FAMILY" \
             --query 'taskDefinition' > migrate-taskdef.json
-          jq --arg IMAGE "$REGISTRY/match-maker-prod/migrate:$TAG" '
+          jq --arg IMAGE "$REGISTRY/$STACK/migrate:$TAG" '
             .containerDefinitions[0].image = $IMAGE
             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                   .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
@@ -198,7 +264,7 @@ jobs:
 
           echo "Exit code: $EXIT_CODE ($REASON)"
           if [ "$EXIT_CODE" != "0" ]; then
-            echo "::error::Migration failed — aborting deploy. Check /ecs/match-maker-prod/migrate."
+            echo "::error::Migration failed — aborting deploy. Check /ecs/$STACK/migrate."
             exit 1
           fi
 
@@ -206,6 +272,7 @@ jobs:
     name: Roll out
     runs-on: ubuntu-latest
     needs: [plan, build-and-push, migrate]
+    environment: ${{ inputs.environment || 'production' }}
     # A rollback skips checks, build and migrations (the schema only moves
     # forward); a normal release needs all of them to have succeeded.
     if: >-
@@ -228,7 +295,7 @@ jobs:
           repos="web worker"
           if [ "${{ inputs.deploy_keycloak }}" = "true" ]; then repos="$repos keycloak"; fi
           for repo in $repos; do
-            aws ecr describe-images --repository-name "match-maker-prod/$repo" \
+            aws ecr describe-images --repository-name "$STACK/$repo" \
               --image-ids imageTag="$TAG" >/dev/null \
               || { echo "::error::No $repo image tagged $TAG in ECR."; exit 1; }
           done
@@ -272,7 +339,7 @@ jobs:
 
           # Strip the server-managed fields that RegisterTaskDefinition rejects,
           # then point the container at the immutable tag.
-          jq --arg IMAGE "$REGISTRY/match-maker-prod/web:$TAG" '
+          jq --arg IMAGE "$REGISTRY/$STACK/web:$TAG" '
             .containerDefinitions[0].image = $IMAGE
             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                   .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
@@ -304,7 +371,7 @@ jobs:
           aws ecs describe-task-definition --task-definition "$FAMILY" \
             --query 'taskDefinition' > worker-taskdef.json
 
-          jq --arg IMAGE "$REGISTRY/match-maker-prod/worker:$TAG" '
+          jq --arg IMAGE "$REGISTRY/$STACK/worker:$TAG" '
             .containerDefinitions[0].image = $IMAGE
             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                   .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
@@ -335,7 +402,7 @@ jobs:
             --query 'services[0].taskDefinition' --output text | sed -E 's#^.*task-definition/([^:]+):[0-9]+$#\1#')
           aws ecs describe-task-definition --task-definition "$FAMILY" \
             --query 'taskDefinition' > keycloak-taskdef.json
-          jq --arg IMAGE "$REGISTRY/match-maker-prod/keycloak:$TAG" '
+          jq --arg IMAGE "$REGISTRY/$STACK/keycloak:$TAG" '
             .containerDefinitions[0].image = $IMAGE
             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                   .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)

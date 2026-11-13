@@ -9,6 +9,8 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     // Integration tests need the docker-compose stack; they skip themselves
     // when DATABASE_URL is absent rather than failing a bare `npm test`.
+    // CI sets REQUIRE_SERVICES so that skipping becomes a failure instead.
+    globalSetup: ["./tests/global-setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

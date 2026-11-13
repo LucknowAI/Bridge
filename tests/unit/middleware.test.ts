@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const unsealSession = vi.hoisted(() => vi.fn());
+const isSessionActive = vi.hoisted(() => vi.fn());
 
 vi.mock("@match-maker/auth", () => ({
   unsealSession,
+  isSessionActive,
   getSessionConfig: () => ({ cookieName: "mb_session" }),
   sessionCookieOptions: (maxAge: number) => ({ httpOnly: true, sameSite: "lax", path: "/", maxAge }),
 }));
@@ -17,9 +19,18 @@ const loginRequest = (query = "", cookie?: string) =>
 
 beforeEach(() => {
   unsealSession.mockReset();
+  isSessionActive.mockReset().mockResolvedValue(true);
 });
 
 describe("login middleware", () => {
+  it("treats a revoked or disabled session as signed out instead of looping", async () => {
+    unsealSession.mockResolvedValue(session);
+    isSessionActive.mockResolvedValue(false);
+    const response = await middleware(loginRequest("?returnTo=%2Fe%2Fdemo", "mb_session=valid"));
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.cookies.get("mb_session")?.value).toBe("");
+  });
+
   it("shows the form when there is no session cookie", async () => {
     const response = await middleware(loginRequest("?returnTo=%2Fe%2Fdemo"));
     expect(response.headers.get("location")).toBeNull();

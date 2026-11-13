@@ -24,14 +24,18 @@ export default async function EventLandingPage({ params }: { params: Promise<{ e
   }
 
   if (!(await container.participants.hasEventAccess(event.id, session.attendeeId))) {
+    const removed = await container.events.rosterState(event.id, session.attendeeId) === "revoked";
     return <main style={shell}>
       <span style={eyebrow}>MR. BRIDGE · EVENT NETWORKING</span>
       <h1>{event.name}</h1>
-      <p>This account is not on the event roster. Ask the organizer to add your registered e-mail.</p>
+      <p>{removed
+        ? "The organizer removed this account's access to the event. Contact them if you think this is a mistake."
+        : "This account is not on the event roster. If you were invited with a different e-mail or phone, sign out and use that one, or ask the organizer to add this e-mail."}</p>
       <form action={signOutCurrentUser}><button style={button} type="submit">Sign out</button></form>
     </main>;
   }
 
+  await container.events.markClaimed(event.id, session.attendeeId);
   const profile = await container.participants.findProfile(event.id, session.attendeeId);
   if (event.status === "open") redirect(profile?.profileComplete ? `/e/${eventSlug}/matches` : `/e/${eventSlug}/profile`);
 
