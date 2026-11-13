@@ -14,12 +14,16 @@ const person = (attendeeId: string, profileRevision = "r1"): ParticipantProfile 
 });
 const candidate = (profile: ParticipantProfile, score: number): MatchCandidate => ({ participant: profile, score, scoreBreakdown: {}, mutualInterest: false, reason: null });
 
-function memoryCache(): ExplanationCache & { store: Map<string, string> } {
+function memoryCache(): ExplanationCache & { store: Map<string, string>; orders: Map<string, string[]> } {
   const store = new Map<string, string>();
+  const orders = new Map<string, string[]>();
   return {
     store,
+    orders,
     getMany: vi.fn(async (keys: string[]) => new Map(keys.filter((key) => store.has(key)).map((key) => [key, store.get(key)!]))),
     setMany: vi.fn(async (entries) => { for (const entry of entries) store.set(entry.key, entry.reason); }),
+    getOrder: vi.fn(async (key: string) => orders.get(key) ?? null),
+    setOrder: vi.fn(async (entry) => { orders.set(entry.key, entry.candidateIds); }),
   };
 }
 
@@ -50,10 +54,25 @@ describe("pair explanation cache", () => {
 
     const second = await stage.execute(viewer, shortlist());
     expect(provider.rerank).toHaveBeenCalledTimes(1);
-    expect(second.candidates.map((item) => item.reason)).toEqual(["LLM says a", "LLM says b"]);
-    // Cached reasons never carry the model's order: the scored order stands.
-    expect(order(second)).toEqual(["a", "b"]);
-    expect(second.rankedBy).toBe("score");
+    expect(second.candidates.map((item) => item.reason)).toEqual(["LLM says b", "LLM says a"]);
+    // The model's order for this exact shortlist is kept, so a refresh does not reshuffle.
+    expect(order(second)).toEqual(["b", "a"]);
+    expect(second.rankedBy).toBe("llm:test:model");
+  });
+
+  it("does not apply a stored order to a different shortlist", async () => {
+    const cache = memoryCache();
+    const provider = llm();
+    const stage = new LlmRerankStage(provider, cache);
+    await stage.execute(viewer, shortlist());
+    await stage.execute(viewer, [candidate(person("b"), 80)]);
+    await stage.execute(viewer, [candidate(person("a"), 90)]);
+    // Every pair is cached, but this pair of people was never ordered as one list.
+    cache.orders.clear();
+    const result = await stage.execute(viewer, shortlist());
+    expect(provider.rerank).toHaveBeenCalledTimes(1);
+    expect(order(result)).toEqual(["a", "b"]);
+    expect(result.rankedBy).toBe("score");
   });
 
   it("asks the model again when a profile changes", async () => {
@@ -97,7 +116,8 @@ describe("pair explanation cache", () => {
   it("keeps working when the cache itself fails", async () => {
     const provider = llm();
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    const broken: ExplanationCache = { getMany: vi.fn().mockRejectedValue(new Error("down")), setMany: vi.fn().mockRejectedValue(new Error("down")) };
+    const down = () => vi.fn().mockRejectedValue(new Error("down"));
+    const broken: ExplanationCache = { getMany: down(), setMany: down(), getOrder: down(), setOrder: down() };
     const result = await new LlmRerankStage(provider, broken).execute(viewer, shortlist());
     expect(result.rankedBy).toBe("llm:test:model");
   });

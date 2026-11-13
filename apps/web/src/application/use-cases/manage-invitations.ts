@@ -2,6 +2,7 @@ import { RESEND_AFTER_MINUTES } from "../../domain/participant/invitation";
 import type { EventRepository } from "../ports/event-repository";
 import type { NotificationPort } from "../ports/notification";
 import { authorizeOrganizer } from "./manage-event";
+import type { AuditLog } from "../ports/audit-log";
 
 export interface InvitationResult {
   sent: number;
@@ -15,7 +16,7 @@ export interface InvitationResult {
  */
 export async function sendInvitations(
   input: { eventId: string; organizerId: string; eventName: string; organizationName: string; eventUrl: string; attendeeId?: string },
-  dependencies: { events: EventRepository; notifications: NotificationPort }
+  dependencies: { events: EventRepository; notifications: NotificationPort; audit?: AuditLog }
 ): Promise<InvitationResult> {
   await authorizeOrganizer(dependencies.events, input.eventId, input.organizerId, "invite");
   const targets = await dependencies.events.invitationTargets(input.eventId, input.attendeeId ?? null, RESEND_AFTER_MINUTES);
@@ -40,6 +41,10 @@ export async function sendInvitations(
       result.failed += 1;
     }
   }
+  await dependencies.audit?.record({
+    eventId: input.eventId, actorId: input.organizerId, action: "invitations.sent",
+    subjectId: input.attendeeId ?? null, details: { ...result, resend: Boolean(input.attendeeId) },
+  });
   return result;
 }
 
@@ -50,10 +55,13 @@ export async function sendInvitations(
  */
 export async function setAttendeeAccess(
   input: { eventId: string; organizerId: string; attendeeId: string; revoked: boolean },
-  dependencies: { events: EventRepository }
+  dependencies: { events: EventRepository; audit?: AuditLog }
 ): Promise<void> {
   await authorizeOrganizer(dependencies.events, input.eventId, input.organizerId, "manageAccess");
   if (!(await dependencies.events.setRevoked(input.eventId, input.attendeeId, input.revoked))) {
     throw new Error("This attendee is not on the event roster");
   }
+  await dependencies.audit?.record({
+    eventId: input.eventId, actorId: input.organizerId, action: input.revoked ? "access.removed" : "access.restored", subjectId: input.attendeeId,
+  });
 }
