@@ -230,6 +230,8 @@ resource "aws_ecs_task_definition" "web" {
         { name = "SESSION_SECRET", valueFrom = local.secret_ref.SESSION_SECRET },
         { name = "KEYCLOAK_CLIENT_SECRET", valueFrom = local.secret_ref.KEYCLOAK_CLIENT_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.secret_ref.RESEND_API_KEY },
+        # Only its presence is read: it switches the Google sign-in option on.
+        { name = "GOOGLE_CLIENT_ID", valueFrom = local.secret_ref.GOOGLE_CLIENT_ID },
         { name = "GEMINI_API_KEY", valueFrom = local.secret_ref.GEMINI_API_KEY },
         { name = "UPSTASH_REDIS_REST_URL", valueFrom = local.secret_ref.UPSTASH_REDIS_REST_URL },
         { name = "UPSTASH_REDIS_REST_TOKEN", valueFrom = local.secret_ref.UPSTASH_REDIS_REST_TOKEN },

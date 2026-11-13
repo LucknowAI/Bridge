@@ -2,6 +2,7 @@ export {
   getAuthConfig,
   getSessionConfig,
   getOtpConfig,
+  isGoogleSignInEnabled,
   type AuthConfig,
   type SessionConfig,
   type OtpConfig,
