@@ -1,10 +1,12 @@
 /**
- * Push credentials from the environment into an already-imported Keycloak realm.
+ * Bring an already-imported Keycloak realm up to date.
  *
  * Keycloak imports realm-export.json only when the realm does not exist yet, so
  * changing KEYCLOAK_CLIENT_SECRET or the Google credentials in .env (or in AWS
  * Secrets Manager) has no effect on a running realm. This applies them through
- * the admin REST API. Safe to re-run.
+ * the admin REST API, along with the account-linking flow and the site's login
+ * theme. Safe to re-run; run it after the first Keycloak start and after
+ * upgrades.
  *
  * Run with:  npm run keycloak:sync
  */
@@ -42,24 +44,88 @@ export async function syncKeycloak(env: Env = process.env, http: typeof fetch = 
   }
 
   const alias = env.KEYCLOAK_GOOGLE_IDP_ALIAS || "google";
-  const googleId = env.GOOGLE_CLIENT_ID?.trim();
-  if (!googleId || googleId === "not-configured") {
-    report.push(`identity provider ${alias}: skipped, GOOGLE_CLIENT_ID is not set`);
-    return report;
-  }
-  const googleSecret = required(env, "GOOGLE_CLIENT_SECRET");
   const path = `/identity-provider/instances/${encodeURIComponent(alias)}`;
   const provider = await (await api(path)).json();
+  const googleId = env.GOOGLE_CLIENT_ID?.trim();
+  const configured = Boolean(googleId && googleId !== "not-configured");
+  await ensureLinkingFlow(api, report);
   await api(path, {
     method: "PUT",
     body: JSON.stringify({
       ...provider,
-      enabled: true,
-      config: { ...provider.config, clientId: googleId, clientSecret: googleSecret },
+      ...(configured && {
+        enabled: true,
+        config: { ...provider.config, clientId: googleId, clientSecret: required(env, "GOOGLE_CLIENT_SECRET") },
+      }),
+      // Google sign-in joins the account an e-mail code already created instead
+      // of asking for a password that account never had.
+      // The flow has no "review profile" step, so no Keycloak form appears.
+      firstBrokerLoginFlowAlias: LINKING_FLOW,
+      trustEmail: true,
     }),
   });
-  report.push(`identity provider ${alias}: Google client updated and enabled`);
+  report.push(configured
+    ? `identity provider ${alias}: Google client updated and enabled`
+    : `identity provider ${alias}: Google credentials skipped, GOOGLE_CLIENT_ID is not set`);
+  report.push(`identity provider ${alias}: first sign-in links existing accounts (${LINKING_FLOW})`);
+
+  const themes = await (await adminServerInfo(http, server, token)).themes?.login ?? [];
+  if (themes.some((theme: { name: string }) => theme.name === LOGIN_THEME)) {
+    const realmRep = await (await api("")).json();
+    if (realmRep.loginTheme !== LOGIN_THEME) await api("", { method: "PUT", body: JSON.stringify({ ...realmRep, loginTheme: LOGIN_THEME }) });
+    report.push(`login theme: ${LOGIN_THEME}`);
+  } else {
+    report.push(`login theme: ${LOGIN_THEME} is not installed in this Keycloak, keeping the default`);
+  }
   return report;
+}
+
+/** First broker login flow that links a verified Google e-mail to the existing user. */
+export const LINKING_FLOW = "mr-bridge link existing account";
+const LOGIN_THEME = "mr-bridge";
+
+type Api = (path: string, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Keycloak's default first-login flow asks someone whose account already exists
+ * to confirm it with a password, which accounts created by e-mail sign-in never
+ * have. This flow creates the user when the e-mail is new and otherwise links
+ * to the existing one. Safe because Google only returns verified addresses
+ * (trustEmail) and the app also rejects unverified ones.
+ */
+async function ensureLinkingFlow(api: Api, report: string[]): Promise<void> {
+  const flows = await (await api("/authentication/flows")).json() as Array<{ alias: string }>;
+  const flowPath = `/authentication/flows/${encodeURIComponent(LINKING_FLOW)}/executions`;
+  if (!flows.some((flow) => flow.alias === LINKING_FLOW)) {
+    await api("/authentication/flows", {
+      method: "POST",
+      body: JSON.stringify({
+        alias: LINKING_FLOW,
+        description: "Create the user if the e-mail is new, otherwise link the existing account. Managed by npm run keycloak:sync.",
+        providerId: "basic-flow",
+        topLevel: true,
+        builtIn: false,
+      }),
+    });
+    report.push(`flow ${LINKING_FLOW}: created`);
+  }
+  for (const provider of ["idp-create-user-if-unique", "idp-auto-link"]) {
+    const executions = await (await api(flowPath)).json() as Array<{ id: string; providerId: string; requirement: string }>;
+    let execution = executions.find((item) => item.providerId === provider);
+    if (!execution) {
+      await api(`${flowPath}/execution`, { method: "POST", body: JSON.stringify({ provider }) });
+      execution = (await (await api(flowPath)).json() as typeof executions).find((item) => item.providerId === provider);
+    }
+    if (execution && execution.requirement !== "ALTERNATIVE") {
+      await api(flowPath, { method: "PUT", body: JSON.stringify({ ...execution, requirement: "ALTERNATIVE" }) });
+    }
+  }
+}
+
+async function adminServerInfo(http: typeof fetch, server: string, token: string) {
+  const response = await http(`${server}/admin/serverinfo`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(`GET /admin/serverinfo failed (${response.status}).`);
+  return response.json();
 }
 
 async function adminToken(http: typeof fetch, server: string, username: string, password: string): Promise<string> {

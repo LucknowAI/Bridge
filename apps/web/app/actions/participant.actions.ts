@@ -2,32 +2,42 @@
 
 import { upsertParticipant } from "../../src/application/use-cases/upsert-participant";
 import { getContainer } from "../../src/composition/container";
+import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { Intent } from "../../src/domain/participant/intent";
-import { getSession } from "../../lib/session";
-import { clearSession } from "../../lib/session";
+import { ValidationError } from "../../src/domain/shared/validation";
+import { readProfileForm } from "../../src/domain/participant/profile-form";
+import { clearSession, endIdentityProviderSession, getSession } from "../../lib/session";
+import { runFormAction, type FormState } from "../../lib/form-state";
 import { redirect } from "next/navigation";
 
-export async function saveParticipantProfile(eventSlug: string, formData: FormData) {
+export async function saveParticipantProfile(eventSlug: string, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, async () => {
+    await saveProfile(eventSlug, formData);
+    redirect(`/e/${eventSlug}/matches?saved=1`);
+  });
+}
+
+async function saveProfile(eventSlug: string, formData: FormData) {
   const session = await getSession();
   if (!session) throw new Error("Sign in before saving your profile");
   const container = getContainer();
   const event = await container.events.findByEventSlug(eventSlug);
-  if (!event || event.status !== "open") throw new Error("This event is not accepting profiles");
-  if (!(await container.participants.hasEventAccess(event.id, session.attendeeId))) {
+  if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) {
     throw new Error("You are not on this event's registration list");
   }
+  assertEventAllows(event.status, "saveProfile");
 
   const intentValue = String(formData.get("intent") || Intent.NETWORKING);
   if (!event.intents.includes(intentValue) || !Object.values(Intent).includes(intentValue as Intent)) {
-    throw new Error("Choose an intent configured for this event");
+    throw new ValidationError("intent", "Choose an intent configured for this event");
   }
   const venueZone = nullable(formData.get("venueZone"));
-  if (venueZone && !event.zones.includes(venueZone)) throw new Error("Choose a venue zone configured for this event");
-  const profile = await upsertParticipant({
+  if (venueZone && !event.zones.includes(venueZone)) throw new ValidationError("venueZone", "Choose a venue zone configured for this event");
+  await upsertParticipant({
     eventId: event.id,
     attendeeId: session.attendeeId,
     intent: intentValue as Intent,
-    interests: String(formData.get("interests") || "").split(",").map((value) => value.trim()).filter(Boolean),
+    interests: String(formData.get("interests") || "").split(","),
     venueZone,
     aboutMe: nullable(formData.get("aboutMe")),
     designation: nullable(formData.get("designation")),
@@ -35,12 +45,14 @@ export async function saveParticipantProfile(eventSlug: string, formData: FormDa
     selfDescription: nullable(formData.get("selfDescription")),
     yearsOfExperience: parseYears(formData.get("yearsOfExperience")),
     mostImpressiveBuild: nullable(formData.get("mostImpressiveBuild")),
-  }, { participants: container.participants, enqueueMatching: container.enqueueEmbedding });
-  return { ok: true, eventSlug, profileName: profile.name };
+    visible: formData.get("visible") === "on",
+  }, { participants: container.participants }, readProfileForm(event.form_config));
 }
 
 export async function signOutCurrentUser() {
+  const session = await getSession();
   await clearSession();
+  await endIdentityProviderSession(session);
   redirect("/login");
 }
 
@@ -53,6 +65,6 @@ function parseYears(value: FormDataEntryValue | null): number | null {
   const text = String(value ?? "").trim();
   if (!text) return null;
   const years = Number(text);
-  if (!Number.isInteger(years)) throw new Error("Years of experience must be a whole number");
+  if (!Number.isInteger(years)) throw new ValidationError("yearsOfExperience", "Years of experience must be a whole number");
   return years;
 }

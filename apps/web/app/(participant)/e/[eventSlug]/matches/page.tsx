@@ -1,27 +1,40 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { redirect } from "next/navigation";
 import { getMyMatches } from "@/src/application/use-cases/get-my-matches";
 import { requireParticipantEvent } from "@/src/lib/auth";
 import { refreshParticipantMatches } from "../../../../actions/match.actions";
 import { requestParticipantIntro } from "../../../../actions/intro.actions";
+import { ActionForm } from "@/components/ui/form";
+import MatchStatus from "@/components/participant/MatchStatus";
+import { getMatchStatus } from "@/src/application/use-cases/get-match-status";
+import { eventAllows } from "@/src/domain/shared/event-lifecycle";
 
-export default async function MatchesPage({ params }: { params: Promise<{ eventSlug: string }> }) {
+export default async function MatchesPage({ params, searchParams }: {
+  params: Promise<{ eventSlug: string }>;
+  searchParams: Promise<{ saved?: string }>;
+}) {
   const { eventSlug } = await params;
-  const { session, event, container } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/matches`);
+  const notice = await searchParams;
+  const { session, event, container } = await requireParticipantEvent(eventSlug, `/e/${eventSlug}/matches`, "viewMatches");
   const viewer = await container.participants.findProfile(event.id, session.attendeeId);
   if (!viewer?.profileComplete) redirect(`/e/${eventSlug}/profile`);
-  const matches = await getMyMatches({ eventId: event.id, participantId: session.attendeeId, limit: 12 }, container.matches);
+  const [matches, state] = await Promise.all([
+    getMyMatches({ eventId: event.id, participantId: session.attendeeId, limit: 12 }, container.matches),
+    getMatchStatus({ eventId: event.id, participantId: session.attendeeId }, container.matchQueue),
+  ]);
+  const canRefresh = eventAllows(event.status, "refreshMatches");
+  const canRequestIntro = eventAllows(event.status, "requestIntro");
 
   return <main style={shell}>
-    <nav><Link href={`/e/${eventSlug}/profile`}>Edit profile</Link><Link href={`/e/${eventSlug}/search`}>Search attendees</Link><Link href={`/e/${eventSlug}/connections`}>Connections</Link></nav>
+    <nav>{canRefresh && <><Link href={`/e/${eventSlug}/profile`}>Edit profile</Link><Link href={`/e/${eventSlug}/search`}>Search attendees</Link></>}<Link href={`/e/${eventSlug}/connections`}>Connections</Link><SignOutButton /></nav>
     <span style={eyebrow}>YOUR EVENT MATCHES</span>
     <h1>People worth meeting.</h1>
     <p>Matches are ranked for your profile. Contact details stay private until you both accept an introduction.</p>
-    {!matches.length ? <section style={empty}>
-      <h2>Your first matches are on the way.</h2>
-      <p>We are embedding your profile and ranking attendees in the background.</p>
-      <form action={refreshParticipantMatches.bind(null, eventSlug)}><button style={button}>Refresh matches</button></form>
-    </section> : <div style={list}>
+    {notice.saved && <p role="status" className="notice">Profile saved. Your matches will update in the background.</p>}
+    {event.status === "closed" && <p className="notice">This event has closed. Your matches stay here; new introductions are no longer possible.</p>}
+    <MatchStatus state={state} hasMatches={matches.length > 0} refresh={canRefresh ? refreshParticipantMatches.bind(null, eventSlug) : undefined} />
+    {matches.length > 0 && <div style={list}>
       {matches.map((match, index) => <article key={match.participant.attendeeId} style={card}>
         <div style={rank}>#{index + 1}</div>
         <div style={{ flex: 1 }}>
@@ -30,13 +43,11 @@ export default async function MatchesPage({ params }: { params: Promise<{ eventS
           {match.participant.aboutMe && <p>{match.participant.aboutMe}</p>}
           {match.participant.mostImpressiveBuild && <p style={muted}>Built: {match.participant.mostImpressiveBuild}</p>}
           <p style={reason}>{match.reason || "A promising person to meet at this event."}</p>
-          <p style={muted}>{match.mutualInterest ? "Your event goals align" : "Suggested for your profile"}</p>
+          <p style={muted}>{match.mutualInterest ? "Likely a strong fit for each other" : "Suggested for your profile"}</p>
         </div>
         <div style={score}>{Math.round(match.score)}%</div>
-        <form action={requestParticipantIntro.bind(null, eventSlug)}>
-          <input type="hidden" name="recipientId" value={match.participant.attendeeId} />
-          <button style={button}>Request intro</button>
-        </form>
+        {canRequestIntro && <ActionForm action={requestParticipantIntro.bind(null, eventSlug)} hidden={{ recipientId: match.participant.attendeeId }}
+          label="Request intro" pendingLabel="Sending…" />}
       </article>)}
     </div>}
   </main>;
@@ -50,5 +61,3 @@ const rank = { color: "#f59e0b", fontSize: 15, fontWeight: 800 } as const;
 const score = { color: "#f59e0b", fontWeight: 800, fontSize: 20 } as const;
 const muted = { color: "#a1a1aa", lineHeight: 1.5 } as const;
 const reason = { color: "#fbbf24", lineHeight: 1.5 } as const;
-const empty = { marginTop: 28, padding: 24, background: "#151519", borderRadius: 12 } as const;
-const button = { border: 0, borderRadius: 8, padding: "11px 15px", background: "#f59e0b", color: "#0a0a0e", fontWeight: 700, cursor: "pointer" } as const;

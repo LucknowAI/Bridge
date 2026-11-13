@@ -1,4 +1,6 @@
 import { Intent } from "./intent";
+import { boundedItems, boundedText, LIMITS, ValidationError } from "../shared/validation";
+import { readProfileForm, type ProfileFormConfig } from "./profile-form";
 
 export interface ParticipantProfile {
   eventId: string;
@@ -17,7 +19,15 @@ export interface ParticipantProfile {
   venueZone: string | null;
   visible: boolean;
   profileComplete?: boolean;
+  /** Goes up on every save; background jobs carry the revision they reflect. */
+  revision?: number;
+  /** When the profile was last saved; part of cached explanation keys. */
+  profileRevision?: string | null;
+  /** Version of the event's profile form this profile was saved under. */
+  formVersion?: number;
   embedding?: number[] | null;
+  /** The provider/model that produced `embedding`; vectors are only compared within one model. */
+  embeddingModel?: string | null;
 }
 
 export type ParticipantProfileInput = Pick<
@@ -33,7 +43,8 @@ export type ParticipantProfileInput = Pick<
   | "intent"
   | "interests"
   | "venueZone"
->;
+  | "formVersion"
+> & { visible?: boolean };
 
 export function profileText(profile: ParticipantProfile): string {
   return [
@@ -50,26 +61,31 @@ export function profileText(profile: ParticipantProfile): string {
     .join("\n");
 }
 
-export function validateProfile(input: ParticipantProfileInput): ParticipantProfileInput {
-  if (!input.eventId || !input.attendeeId) throw new Error("Participant and event are required");
-  if (!Object.values(Intent).includes(input.intent)) throw new Error("Choose a valid networking intent");
-  if (!Array.isArray(input.interests)) throw new Error("Interests must be a list");
-  if (input.yearsOfExperience != null && (!Number.isInteger(input.yearsOfExperience) || input.yearsOfExperience < 0 || input.yearsOfExperience > 80)) {
-    throw new Error("Years of experience must be between 0 and 80");
+export function validateProfile(input: ParticipantProfileInput, form: ProfileFormConfig = readProfileForm({})): ParticipantProfileInput {
+  // Required fields and their labels come from the event's profile form.
+  const text = (key: "designation" | "domain" | "aboutMe" | "selfDescription" | "mostImpressiveBuild", value: string | null, limit: number) =>
+    boundedText(value, key, form.fields[key].label, limit, { required: form.fields[key].required });
+  if (!input.eventId || !input.attendeeId) throw new ValidationError(null, "Participant and event are required");
+  if (!Object.values(Intent).includes(input.intent)) throw new ValidationError("intent", "Choose a valid networking intent");
+  if (!Array.isArray(input.interests)) throw new ValidationError("interests", "Interests must be a list");
+  const years = input.yearsOfExperience;
+  if (years == null && form.fields.yearsOfExperience.required) {
+    throw new ValidationError("yearsOfExperience", `${form.fields.yearsOfExperience.label} is required`);
   }
+  if (years != null && (!Number.isInteger(years) || years < 0 || years > LIMITS.yearsOfExperience)) {
+    throw new ValidationError("yearsOfExperience", `Years of experience must be a whole number from 0 to ${LIMITS.yearsOfExperience}`);
+  }
+  const interests = boundedItems(input.interests, "interests", "interests", { count: LIMITS.interestCount, length: LIMITS.interestLength });
+  if (!interests.length && form.fields.interests.required) throw new ValidationError("interests", `${form.fields.interests.label} is required`);
   return {
     ...input,
-    designation: clean(input.designation),
-    domain: clean(input.domain),
-    aboutMe: clean(input.aboutMe),
-    selfDescription: clean(input.selfDescription),
-    mostImpressiveBuild: clean(input.mostImpressiveBuild),
-    venueZone: clean(input.venueZone),
-    interests: [...new Set(input.interests.map((interest) => interest.trim()).filter(Boolean))].slice(0, 20),
+    designation: text("designation", input.designation, LIMITS.designation),
+    domain: text("domain", input.domain, LIMITS.domain),
+    aboutMe: text("aboutMe", input.aboutMe, LIMITS.aboutMe),
+    selfDescription: text("selfDescription", input.selfDescription, LIMITS.selfDescription),
+    mostImpressiveBuild: text("mostImpressiveBuild", input.mostImpressiveBuild, LIMITS.mostImpressiveBuild),
+    venueZone: boundedText(input.venueZone, "venueZone", "Venue zone", LIMITS.zoneLength),
+    interests,
+    formVersion: form.version,
   };
-}
-
-function clean(value: string | null): string | null {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed.slice(0, 2000) : null;
 }
