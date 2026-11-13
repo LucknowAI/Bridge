@@ -37,8 +37,12 @@ resource "aws_iam_role_policy_attachment" "ecs_execution_managed" {
 # read access — not the task role.
 data "aws_iam_policy_document" "secrets_read" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.app.arn]
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = [
+      aws_secretsmanager_secret.app.arn,
+      aws_secretsmanager_secret.identity.arn,
+      aws_secretsmanager_secret.migrate.arn,
+    ]
   }
 }
 
@@ -142,6 +146,17 @@ data "aws_iam_policy_document" "github_deploy" {
     resources = ["*"]
   }
 
+  # Promotion copies another stack's tested images (e.g. staging's) here
+  # unchanged, so this role may read that stack's repositories.
+  dynamic "statement" {
+    for_each = var.image_promotion_source != "" ? [var.image_promotion_source] : []
+    content {
+      sid       = "EcrPromoteFrom"
+      actions   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:BatchCheckLayerAvailability", "ecr:DescribeImages"]
+      resources = ["arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/${statement.value}/*"]
+    }
+  }
+
   statement {
     sid = "EcrPush"
     actions = [
@@ -158,6 +173,7 @@ data "aws_iam_policy_document" "github_deploy" {
       aws_ecr_repository.web.arn,
       aws_ecr_repository.keycloak.arn,
       aws_ecr_repository.migrate.arn,
+      aws_ecr_repository.worker.arn,
     ]
   }
 

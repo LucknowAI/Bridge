@@ -55,11 +55,26 @@ export function getAuthConfig(): AuthConfig {
   };
 }
 
+/**
+ * Google sign-in is offered only when the Google client is configured; the
+ * same GOOGLE_CLIENT_ID feeds Keycloak's identity provider.
+ */
+export function isGoogleSignInEnabled(): boolean {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  return Boolean(clientId && clientId !== "not-configured");
+}
+
 export interface SessionConfig {
   secret: string;
   cookieName: string;
   /** Session lifetime in seconds. */
   maxAge: number;
+  /**
+   * Earlier secrets still accepted for reading cookies (never for writing),
+   * so rotating SESSION_SECRET does not sign anyone out. Keep the old value in
+   * SESSION_SECRET_PREVIOUS for at least one session lifetime.
+   */
+  previousSecrets: string[];
   secure: boolean;
 }
 
@@ -71,8 +86,13 @@ export function getSessionConfig(): SessionConfig {
         "Generate one with: openssl rand -base64 48"
     );
   }
+  const previousSecrets = (process.env.SESSION_SECRET_PREVIOUS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (previousSecrets.some((value) => value.length < 32)) {
+    throw new Error("Every SESSION_SECRET_PREVIOUS value must be at least 32 characters.");
+  }
   return {
     secret,
+    previousSecrets,
     cookieName: optional("SESSION_COOKIE_NAME", "mb_session"),
     maxAge: Number(optional("SESSION_MAX_AGE", String(60 * 60 * 24 * 7))),
     secure: process.env.NODE_ENV === "production",
