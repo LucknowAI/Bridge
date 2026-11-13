@@ -1,0 +1,474 @@
+name: Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Where to deploy. Staging is a separate Terraform stack (environment = staging)."
+        type: choice
+        options: [production, staging]
+        default: production
+      promote_tag:
+        description: "Promote: copy this tag's staging images to production unchanged, then migrate and roll out (production only)"
+        type: string
+        default: ""
+      deploy_keycloak:
+        description: "Also rebuild and roll out Keycloak"
+        type: boolean
+        default: false
+      rollback_tag:
+        description: "Roll back: re-deploy this existing image tag (skips checks, build and migrations)"
+        type: string
+        default: ""
+
+# Never let two deploys race for the same service.
+concurrency:
+  group: deploy-${{ inputs.environment || 'production' }}
+  cancel-in-progress: false
+
+permissions:
+  # Required to fetch the OIDC token that assumes the AWS deploy role.
+  id-token: write
+  contents: read
+
+# Staging names follow the Terraform stack (match-maker-staging-*) and never
+# fall back to production's repository variables. Each job that touches AWS
+# runs in the GitHub environment of the target, so its role, subnets and URL
+# come from that environment's secrets and variables.
+env:
+  TARGET: ${{ inputs.environment || 'production' }}
+  STACK: ${{ inputs.environment == 'staging' && 'match-maker-staging' || 'match-maker-prod' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+  ECS_CLUSTER: ${{ inputs.environment == 'staging' && 'match-maker-staging-cluster' || vars.ECS_CLUSTER || 'match-maker-prod-cluster' }}
+  ECS_WEB_SERVICE: ${{ inputs.environment == 'staging' && 'match-maker-staging-web' || vars.ECS_WEB_SERVICE || 'match-maker-prod-web' }}
+  ECS_WORKER_SERVICE: ${{ inputs.environment == 'staging' && 'match-maker-staging-worker' || vars.ECS_WORKER_SERVICE || 'match-maker-prod-worker' }}
+  ECS_KEYCLOAK_SERVICE: ${{ inputs.environment == 'staging' && 'match-maker-staging-keycloak' || vars.ECS_KEYCLOAK_SERVICE || 'match-maker-prod-keycloak' }}
+  MIGRATE_TASK_FAMILY: ${{ inputs.environment == 'staging' && 'match-maker-staging-migrate' || vars.MIGRATE_TASK_FAMILY || 'match-maker-prod-migrate' }}
+
+jobs:
+  # Decides what ships: the pushed commit, or an existing tag on rollback.
+  plan:
+    name: Plan release
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'production' }}
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      rollback: ${{ steps.plan.outputs.rollback }}
+      promote: ${{ steps.plan.outputs.promote }}
+    steps:
+      # A staging run must find staging's own settings, never production's.
+      - name: Check the target environment
+        env:
+          STACK_NAME: ${{ vars.STACK_NAME }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = "staging" ] && [ "${STACK_NAME:-}" != "match-maker-staging" ]; then
+            echo "::error::Set STACK_NAME=match-maker-staging (and staging's AWS secrets) in the GitHub 'staging' environment first."
+            exit 1
+          fi
+
+      - id: plan
+        env:
+          ROLLBACK_TAG: ${{ inputs.rollback_tag }}
+          PROMOTE_TAG: ${{ inputs.promote_tag }}
+        run: |
+          set -euo pipefail
+          echo "promote=false" >> "$GITHUB_OUTPUT"
+          if [ -n "${PROMOTE_TAG:-}" ]; then
+            if [ "$TARGET" != "production" ] || [ -n "${ROLLBACK_TAG:-}" ] || ! [[ "$PROMOTE_TAG" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::promote_tag takes an image tag, targets production, and cannot be combined with rollback_tag."
+              exit 1
+            fi
+            echo "tag=$PROMOTE_TAG" >> "$GITHUB_OUTPUT"
+            echo "rollback=false" >> "$GITHUB_OUTPUT"
+            echo "promote=true" >> "$GITHUB_OUTPUT"
+            echo "Promoting the staging images tagged $PROMOTE_TAG"
+          elif [ -n "${ROLLBACK_TAG:-}" ]; then
+            if ! [[ "$ROLLBACK_TAG" =~ ^[0-9a-f]{7,40}$ ]]; then
+              echo "::error::rollback_tag must be an image tag (a commit SHA prefix), got '$ROLLBACK_TAG'."
+              exit 1
+            fi
+            echo "tag=$ROLLBACK_TAG" >> "$GITHUB_OUTPUT"
+            echo "rollback=true" >> "$GITHUB_OUTPUT"
+            echo "Rolling back to $ROLLBACK_TAG"
+          else
+            # The commit SHA is the tag. `latest` also moves, but every deploy is
+            # pinned to an immutable tag so a rollback is just a re-deploy of one.
+            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "rollback=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The full CI suite (lint, typecheck, unit + real-Postgres integration tests,
+  # Terraform validate) against the exact commit being shipped. Nothing is
+  # built or pushed unless all of it passes.
+  ci:
+    name: Required checks
+    needs: [plan]
+    # A promoted tag passed these checks when it was built for staging.
+    if: needs.plan.outputs.rollback != 'true' && needs.plan.outputs.promote != 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      build_images: false
+
+  build-and-push:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    needs: [plan, ci]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.rollback != 'true' &&
+      (needs.plan.outputs.promote == 'true' || needs.ci.result == 'success')
+    environment: ${{ inputs.environment || 'production' }}
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The same image digests that passed staging; nothing is rebuilt. Needs
+      # both stacks' repositories in one AWS account and registry.
+      - name: Copy the staging images
+        if: needs.plan.outputs.promote == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          repos="web migrate worker"
+          if [ "${{ inputs.deploy_keycloak }}" = "true" ]; then repos="$repos keycloak"; fi
+          for repo in $repos; do
+            docker buildx imagetools create \
+              --tag "$REGISTRY/$STACK/$repo:$TAG" --tag "$REGISTRY/$STACK/$repo:latest" \
+              "$REGISTRY/match-maker-staging/$repo:$TAG"
+          done
+
+      - name: Build & push web
+        if: needs.plan.outputs.promote != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          build-args: APP_VERSION=${{ env.TAG }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/web:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push migrate
+        if: needs.plan.outputs.promote != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/migrate.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/migrate:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/migrate:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push worker
+        if: needs.plan.outputs.promote != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/worker.Dockerfile
+          push: true
+          build-args: APP_VERSION=${{ env.TAG }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/worker:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push Keycloak
+        if: inputs.deploy_keycloak && needs.plan.outputs.promote != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/keycloak.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/keycloak:${{ env.TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.STACK }}/keycloak:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  migrate:
+    name: Run migrations
+    runs-on: ubuntu-latest
+    needs: [plan, build-and-push]
+    if: >-
+      !cancelled() && needs.plan.outputs.rollback != 'true' && needs.build-and-push.result == 'success'
+    environment: ${{ inputs.environment || 'production' }}
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Running the family name would start its newest revision, which points
+      # at the mutable `latest` tag. Register a revision pinned to this release
+      # so exactly the migrator that was just built runs.
+      - name: Pin migrate task definition to the new image
+        id: migrate-taskdef
+        run: |
+          set -euo pipefail
+          REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+          aws ecs describe-task-definition --task-definition "$MIGRATE_TASK_FAMILY" \
+            --query 'taskDefinition' > migrate-taskdef.json
+          jq --arg IMAGE "$REGISTRY/$STACK/migrate:$TAG" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' migrate-taskdef.json > new-migrate-taskdef.json
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-migrate-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$NEW_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered $NEW_ARN"
+
+      # Migrations run BEFORE the new tasks roll out, so they must be
+      # backwards-compatible with the version currently serving traffic.
+      - name: Run migration task and wait
+        run: |
+          set -euo pipefail
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --task-definition "${{ steps.migrate-taskdef.outputs.arn }}" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.TASK_SECURITY_GROUP_ID }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          REASON=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN" \
+            --query 'tasks[0].stoppedReason' --output text)
+
+          echo "Exit code: $EXIT_CODE ($REASON)"
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "::error::Migration failed — aborting deploy. Check /ecs/$STACK/migrate."
+            exit 1
+          fi
+
+  deploy:
+    name: Roll out
+    runs-on: ubuntu-latest
+    needs: [plan, build-and-push, migrate]
+    environment: ${{ inputs.environment || 'production' }}
+    # A rollback skips checks, build and migrations (the schema only moves
+    # forward); a normal release needs all of them to have succeeded.
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.rollback == 'true' || needs.migrate.result == 'success')
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check the rollback images exist
+        if: needs.plan.outputs.rollback == 'true'
+        run: |
+          set -euo pipefail
+          repos="web worker"
+          if [ "${{ inputs.deploy_keycloak }}" = "true" ]; then repos="$repos keycloak"; fi
+          for repo in $repos; do
+            aws ecr describe-images --repository-name "$STACK/$repo" \
+              --image-ids imageTag="$TAG" >/dev/null \
+              || { echo "::error::No $repo image tagged $TAG in ECR."; exit 1; }
+          done
+
+      # Remembered so a failed smoke test can put these back.
+      - name: Record the revisions currently serving
+        id: previous
+        run: |
+          set -euo pipefail
+          for svc in web worker; do
+            name_var="ECS_${svc^^}_SERVICE"
+            arn=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "${!name_var}" \
+              --query 'services[0].taskDefinition' --output text)
+            echo "$svc=$arn" >> "$GITHUB_OUTPUT"
+            echo "$svc is serving $arn"
+          done
+
+      - name: Pin web task definition to the new image
+        id: taskdef
+        run: |
+          set -euo pipefail
+          REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          # Start from the family's newest revision, not the one the service is
+          # running, so settings and secrets changed by Terraform ship too.
+          FAMILY=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" \
+            --query 'services[0].taskDefinition' --output text | sed -E 's#^.*task-definition/([^:]+):[0-9]+$#\1#')
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > taskdef.json
+
+          # Production login must send real e-mail: never ship the dev fallback,
+          # and require the Resend key (an empty value fails the app's startup check).
+          if jq -e '[.containerDefinitions[].environment[]? | select(.name == "EMAIL_DEV_FALLBACK" and .value == "true")] | length > 0' taskdef.json >/dev/null; then
+            echo "::error::EMAIL_DEV_FALLBACK=true is set on the web task; login codes would be logged instead of sent."
+            exit 1
+          fi
+          if ! jq -e '[.containerDefinitions[].secrets[]? | select(.name == "RESEND_API_KEY")] | length > 0' taskdef.json >/dev/null; then
+            echo "::error::The web task has no RESEND_API_KEY secret; login e-mail cannot be delivered."
+            exit 1
+          fi
+
+          # Strip the server-managed fields that RegisterTaskDefinition rejects,
+          # then point the container at the immutable tag.
+          jq --arg IMAGE "$REGISTRY/$STACK/web:$TAG" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' taskdef.json > new-taskdef.json
+
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+
+          echo "arn=$NEW_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered $NEW_ARN"
+
+      - name: Update web service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_WEB_SERVICE" \
+            --task-definition "${{ steps.taskdef.outputs.arn }}" \
+            --query 'service.deployments[0].id' --output text
+
+      - name: Pin worker task definition to the new image
+        id: worker-taskdef
+        run: |
+          set -euo pipefail
+          REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          FAMILY=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_WORKER_SERVICE" \
+            --query 'services[0].taskDefinition' --output text | sed -E 's#^.*task-definition/([^:]+):[0-9]+$#\1#')
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > worker-taskdef.json
+
+          jq --arg IMAGE "$REGISTRY/$STACK/worker:$TAG" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' worker-taskdef.json > new-worker-taskdef.json
+
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-worker-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$NEW_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered $NEW_ARN"
+
+      - name: Update worker service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_WORKER_SERVICE" \
+            --task-definition "${{ steps.worker-taskdef.outputs.arn }}" \
+            --query 'service.deployments[0].id' --output text
+
+      # Forcing a new deployment would restart Keycloak's current revision,
+      # which points at `latest`; pin it to the tag that was just built.
+      - name: Pin and roll out Keycloak
+        if: inputs.deploy_keycloak
+        run: |
+          set -euo pipefail
+          REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.${AWS_REGION}.amazonaws.com"
+          FAMILY=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_KEYCLOAK_SERVICE" \
+            --query 'services[0].taskDefinition' --output text | sed -E 's#^.*task-definition/([^:]+):[0-9]+$#\1#')
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > keycloak-taskdef.json
+          jq --arg IMAGE "$REGISTRY/$STACK/keycloak:$TAG" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+          ' keycloak-taskdef.json > new-keycloak-taskdef.json
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-keycloak-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_KEYCLOAK_SERVICE" \
+            --task-definition "$NEW_ARN" >/dev/null
+          echo "Keycloak rolling out $NEW_ARN"
+
+      - name: Wait for the service to stabilise
+        run: |
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" "$ECS_WORKER_SERVICE"
+          echo "Web and worker deployments are stable."
+
+      # The deployment circuit breaker rolls a failed rollout back, after which
+      # the service is "stable" on the OLD revision. Check what is serving.
+      - name: Confirm the new revisions are serving
+        run: |
+          set -euo pipefail
+          check() {
+            local service=$1 expected=$2 serving
+            serving=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" \
+              --query "services[0].deployments[?status=='PRIMARY'].taskDefinition | [0]" --output text)
+            if [ "$serving" != "$expected" ]; then
+              echo "::error::$service is serving $serving, not $expected (ECS rolled the deployment back)."
+              return 1
+            fi
+            echo "$service is serving $expected"
+          }
+          check "$ECS_WEB_SERVICE" "${{ steps.taskdef.outputs.arn }}"
+          check "$ECS_WORKER_SERVICE" "${{ steps.worker-taskdef.outputs.arn }}"
+
+      - name: Smoke test
+        env:
+          URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$URL" ]; then
+            echo "::error::Set the APP_BASE_URL repository variable; a release is not verified without a smoke test."
+            exit 1
+          fi
+
+          for attempt in 1 2 3 4 5; do
+            version=$(curl -fsS --max-time 15 "$URL/api/health" | jq -r '.version' || true)
+            if [ "$version" = "$TAG" ] && curl -fsS --max-time 15 "$URL/api/health/ready" | tee /tmp/ready.json; then
+              echo
+              echo "$URL is serving $TAG and its dependencies are ready."
+              exit 0
+            fi
+            echo "attempt $attempt: serving '${version:-nothing}', expected '$TAG'; retrying in 10s"
+            sleep 10
+          done
+
+          echo "::error::Smoke test failed for $TAG."
+          exit 1
+
+      - name: Roll back to the previous revisions
+        if: failure() && steps.previous.outputs.web != ''
+        run: |
+          set -euo pipefail
+          echo "::warning::Deploy of $TAG failed; restoring the revisions that were serving before."
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_WEB_SERVICE" \
+            --task-definition "${{ steps.previous.outputs.web }}" >/dev/null
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_WORKER_SERVICE" \
+            --task-definition "${{ steps.previous.outputs.worker }}" >/dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE" "$ECS_WORKER_SERVICE"
+          echo "Restored ${{ steps.previous.outputs.web }} and ${{ steps.previous.outputs.worker }}."

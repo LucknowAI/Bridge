@@ -1,0 +1,260 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  # Every pull request, whatever branch it targets.
+  pull_request:
+  # deploy.yml runs these same checks before it builds anything, so there is
+  # one definition of what a release must pass.
+  workflow_call:
+    inputs:
+      build_images:
+        description: "Also build the images (the deploy builds and pushes its own)"
+        type: boolean
+        default: true
+
+# A new push supersedes an in-flight run on the same branch. The workflow name
+# keeps a deploy's call to this file out of the standalone CI run's group,
+# which a push to main starts at the same time.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  quality:
+    name: Lint, typecheck & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The migration gate compares with the base commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npx vitest run tests/unit
+
+      # Migrations run before the new code starts, and a rollback runs the
+      # previous image on the migrated schema: released migrations never
+      # change and new ones only expand.
+      - name: Migrations are safe to roll back from
+        run: npx tsx tools/check-migrations.ts "${{ github.event.pull_request.base.sha || github.event.before }}"
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+
+    # The same Postgres (with the Keycloak database) and Keycloak (with the
+    # realm import and theme) that docker compose runs locally.
+    env:
+      DATABASE_URL: postgres://matchmaker:matchmaker@localhost:5432/matchmaker
+      DATABASE_SSL: disable
+      SESSION_SECRET: ci-session-secret-long-enough-for-validation-x
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/match-maker
+      KEYCLOAK_PUBLIC_URL: http://localhost:8080
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_CLIENT_ID: match-maker-web
+      KEYCLOAK_CLIENT_SECRET: ci-client-secret
+      APP_BASE_URL: http://localhost:3000
+      # Suites skip themselves without these services; here that is a failure.
+      REQUIRE_SERVICES: db,keycloak
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Start Postgres and Keycloak
+        run: docker compose up -d --wait postgres keycloak
+
+      # The suite calls migrate() itself, so this only proves the runner works
+      # standalone — the way the deploy pipeline invokes it.
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Configure Keycloak
+        run: |
+          npm run keycloak:wait
+          npm run keycloak:sync
+
+      - name: Integration tests
+        run: npx vitest run tests/integration --reporter=default --reporter=json --outputFile=vitest-report.json
+
+      # A suite that skipped itself would otherwise count as a pass.
+      - name: Every integration test ran
+        run: npx tsx tools/check-test-report.ts vitest-report.json
+
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color postgres keycloak | tail -n 300
+
+  browser:
+    name: Browser acceptance
+    runs-on: ubuntu-latest
+    needs: [quality]
+
+    # The built app and the worker against the compose Postgres and Keycloak.
+    # Login codes are logged instead of e-mailed and read from the app's log.
+    env:
+      DATABASE_URL: postgres://matchmaker:matchmaker@localhost:5432/matchmaker
+      DATABASE_SSL: disable
+      SESSION_SECRET: ci-session-secret-long-enough-for-validation-x
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/match-maker
+      KEYCLOAK_PUBLIC_URL: http://localhost:8080
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KEYCLOAK_CLIENT_ID: match-maker-web
+      KEYCLOAK_CLIENT_SECRET: ci-client-secret
+      APP_BASE_URL: http://localhost:3000
+      EMAIL_DEV_FALLBACK: "true"
+      MATCH_REFRESH_DELAY_SECONDS: "3"
+      E2E_BASE_URL: http://localhost:3000
+      E2E_WEB_LOG: ${{ github.workspace }}/e2e-web.log
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Start Postgres and Keycloak
+        run: docker compose up -d --wait postgres keycloak
+
+      - name: Migrate, seed and configure Keycloak
+        run: |
+          npm run db:migrate
+          npm run db:seed
+          npm run keycloak:wait
+          npm run keycloak:sync
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start app and worker
+        run: |
+          (cd apps/web && nohup npx next start -p 3000 > "$E2E_WEB_LOG" 2>&1 &)
+          nohup npm run worker > e2e-worker.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:3000/api/health/ready && exit 0
+            sleep 2
+          done
+          cat "$E2E_WEB_LOG"
+          exit 1
+
+      - name: Browser tests
+        run: npm run test:e2e
+
+      - name: Keep report and logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-acceptance
+          path: |
+            playwright-report/
+            test-results/
+            e2e-web.log
+            e2e-worker.log
+          retention-days: 7
+
+  build:
+    name: Build images
+    runs-on: ubuntu-latest
+    needs: [quality]
+    # Push and pull_request runs have no inputs, so this is true for them.
+    if: ${{ inputs.build_images != false }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build only — publishing happens in deploy.yml, and only from main.
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/migrate.Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/worker.Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Keycloak image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/keycloak.Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  terraform:
+    name: Terraform validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+        working-directory: infra/terraform
+
+      # No backend, no credentials — this only checks the configuration parses
+      # and is internally consistent.
+      - name: Init (no backend)
+        run: terraform init -backend=false
+        working-directory: infra/terraform
+
+      - name: Validate
+        run: terraform validate
+        working-directory: infra/terraform
