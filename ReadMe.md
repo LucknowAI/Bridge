@@ -4,7 +4,7 @@ Mr. Bridge is a multi event networking and matchmaking app. Organizers create ev
 
 The implementation follows the architecture described in [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md). The [end-to-end flow](docs/END_TO_END_FLOW.md) and [matching pipeline](docs/BRIDGE_ENGINE_PIPELINE.md) docs show the product journeys.
 
-See the [production roadmap](docs/PRODUCTION_ROADMAP.md) for authentication findings, the invited-account signup policy, Google setup, and remaining work ordered by implementation effort.
+See the [production roadmap](docs/PRODUCTION_ROADMAP.md) for authentication findings, the invited-account signup policy, Google setup, and remaining work ordered by implementation effort. The [operations runbook](docs/OPERATIONS.md) covers releases, staging, rollback, alarms, database restore, secret rotation and the launch checklist.
 
 ## Architecture
 
@@ -102,11 +102,20 @@ The first command imports the global attendee directory so the organizer account
 | `npm run build` | Build workspace packages and the app |
 | `npm run typecheck` | Type-check all workspaces |
 | `npm run lint` | Run ESLint |
-| `npm test` | Run unit and integration suites |
+| `npm test` | Run unit and integration suites. Integration suites skip without Postgres/Keycloak; set `REQUIRE_SERVICES=db,keycloak` to fail instead (CI does, and `tools/check-test-report.ts` fails on any skipped test). Stop a locally running worker first, or it claims the pipeline test's jobs |
+| `npm run test:e2e` | Browser acceptance suite (Playwright) against a running app and worker started with `EMAIL_DEV_FALLBACK=true`; set `E2E_BASE_URL` and `E2E_WEB_LOG` (the app's output, where login codes are read) |
 | `npm run db:migrate` | Apply pending PostgreSQL migrations |
+| `npm run capacity:check` | Measure matching throughput, search latency and model calls for an event size against the budgets in the runbook |
+| `npm run db:verify` / `db:restore-rehearsal` | Check a database (or a restored copy) is usable; rehearse dump and restore locally |
 | `npm run db:seed` | Upsert demo roster, organization, event, and organizer |
 | `npm run db:import -- <file> [event-slug]` | Import attendee rows and optionally attach them to an event |
 | `npm run keycloak:wait` | Wait for the configured Keycloak realm to respond |
+| `npm run keycloak:sync` | Bring an existing realm up to date: client secret, Google credentials, the account-linking flow (Google joins an account an e-mail code created), and the site login theme. Run after the first Keycloak start and after upgrades |
+| `npm run account:disable -- <email>` | Block sign-in and end every session (database and Keycloak); `account:enable` undoes it |
+| `npm run account:revoke-sessions -- <email>` | Sign the person out everywhere without disabling the account |
+| `npm run jobs:failed` | List background matching jobs that failed after every retry, with their last error |
+| `npm run jobs:retry -- <id\|all>` | Queue failed jobs again with fresh attempts |
+| `npm run account:erase -- <email> --yes` | Deletion request: delete the person, their event profiles, matches, introductions, cached explanations and Keycloak user (recorded in the audit log) |
 | `npm run docker:up` | Build images and start the local Compose stack |
 
 `DATABASE_URL` should point at `localhost` for commands run on the host. Compose sets the service hostname `postgres` inside containers.
@@ -124,6 +133,22 @@ See `.env.example` for the full list. The main settings are:
 | `GEMINI_API_KEY` | Enables Gemini profile embeddings and LLM reranking |
 | `DEFAULT_EVENT_SLUG` | Event used by the `/` redirect |
 | `SEED_ON_MIGRATE` | Seeds demo data in the local stack; leave false in production |
+
+## Activating real e-mail and Google sign-in
+
+Locally, login codes are printed to the web log (`EMAIL_DEV_FALLBACK=true`) and the Google option is hidden. To switch on the real services:
+
+1. **E-mail:** verify a sending domain in [Resend](https://resend.com), then set `RESEND_API_KEY` and `EMAIL_FROM` (for example `Mr. Bridge <login@your-domain>`). Set `EMAIL_DEV_FALLBACK=false` to prove delivery works.
+2. **Google:** create an OAuth web client in Google Cloud Console with the authorised redirect URI `http://localhost:8080/realms/match-maker/broker/google/endpoint` (use your Keycloak host in other environments). Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+3. Apply the credentials to the running realm and restart the web app:
+
+   ```powershell
+   npm run keycloak:sync
+   ```
+
+   Keycloak imports `realm-export.json` only on first boot, so editing `.env` alone does not update an existing realm.
+
+In AWS, put the same values in the app's Secrets Manager secret (see `terraform output`). The web app refuses to start without `RESEND_API_KEY`, and the deploy workflow rejects a web task that enables `EMAIL_DEV_FALLBACK` or lacks the Resend secret.
 
 ## Docker and deployment
 

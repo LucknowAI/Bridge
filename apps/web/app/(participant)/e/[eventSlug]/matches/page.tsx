@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignOutButton from "@/components/ui/SignOutButton";
 import { redirect } from "next/navigation";
 import { getMyMatches } from "@/src/application/use-cases/get-my-matches";
 import { requireParticipantEvent } from "@/src/lib/auth";
@@ -26,7 +27,7 @@ export default async function MatchesPage({ params, searchParams }: {
   const canRequestIntro = eventAllows(event.status, "requestIntro");
 
   return <main style={shell}>
-    <nav>{canRefresh && <><Link href={`/e/${eventSlug}/profile`}>Edit profile</Link><Link href={`/e/${eventSlug}/search`}>Search attendees</Link></>}<Link href={`/e/${eventSlug}/connections`}>Connections</Link></nav>
+    <nav>{canRefresh && <><Link href={`/e/${eventSlug}/profile`}>Edit profile</Link><Link href={`/e/${eventSlug}/search`}>Search attendees</Link></>}<Link href={`/e/${eventSlug}/connections`}>Connections</Link><SignOutButton /></nav>
     <span style={eyebrow}>YOUR EVENT MATCHES</span>
     <h1>People worth meeting.</h1>
     <p>Matches are ranked for your profile. Contact details stay private until you both accept an introduction.</p>
@@ -42,7 +43,7 @@ export default async function MatchesPage({ params, searchParams }: {
           {match.participant.aboutMe && <p>{match.participant.aboutMe}</p>}
           {match.participant.mostImpressiveBuild && <p style={muted}>Built: {match.participant.mostImpressiveBuild}</p>}
           <p style={reason}>{match.reason || "A promising person to meet at this event."}</p>
-          <p style={muted}>{match.mutualInterest ? "Your event goals align" : "Suggested for your profile"}</p>
+          <p style={muted}>{match.mutualInterest ? "Likely a strong fit for each other" : "Suggested for your profile"}</p>
         </div>
         <div style={score}>{Math.round(match.score)}%</div>
         {canRequestIntro && <ActionForm action={requestParticipantIntro.bind(null, eventSlug)} hidden={{ recipientId: match.participant.attendeeId }}

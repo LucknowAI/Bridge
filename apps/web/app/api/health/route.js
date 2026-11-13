@@ -15,6 +15,8 @@ export async function GET() {
   return NextResponse.json({
     status: "ok",
     service: "match-maker-web",
+    // Release tag baked into the image; the deploy smoke test checks it.
+    version: process.env.APP_VERSION || "dev",
     uptime: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
   });

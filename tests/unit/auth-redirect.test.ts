@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { safeReturnTo } from "../../apps/web/lib/safe-return-to";
+import { loginErrorPath, postLoginPath, safeReturnTo } from "../../apps/web/lib/safe-return-to";
+
+describe("post-login destinations", () => {
+  it.each(["/login", "/login?returnTo=%2Fe%2Fdemo", "/login/", "/login#form"])("never returns to the login page: %s", (value) => {
+    expect(postLoginPath(value)).toBe("/");
+  });
+
+  it("keeps ordinary destinations, including look-alike paths", () => {
+    expect(postLoginPath("/e/demo/matches")).toBe("/e/demo/matches");
+    expect(postLoginPath("/loginhelp")).toBe("/loginhelp");
+  });
+
+  it("builds an error URL that keeps the destination", () => {
+    expect(loginErrorPath("unregistered", "/e/demo/profile")).toBe("/login?error=unregistered&returnTo=%2Fe%2Fdemo%2Fprofile");
+  });
+
+  it("omits an empty, external, or looping destination from the error URL", () => {
+    expect(loginErrorPath("provider")).toBe("/login?error=provider");
+    expect(loginErrorPath("provider", "https://outside.example")).toBe("/login?error=provider");
+    expect(loginErrorPath("provider", "/login")).toBe("/login?error=provider");
+  });
+});
 
 describe("login return destinations", () => {
   it.each([

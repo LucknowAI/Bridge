@@ -4,6 +4,7 @@ import { issueChallenge, getOtpConfig, RateLimitError } from "@match-maker/auth"
 import { sendLoginEmail } from "@match-maker/email";
 import { canReturnToPath, clientIp } from "@/lib/session";
 import { safeReturnTo } from "@/lib/safe-return-to";
+import { limitByIp, requireJson } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,8 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request) {
   try {
+    const refused = requireJson(request) ?? await limitByIp(request, "otpRequest");
+    if (refused) return refused;
     const { phone, email, returnTo: requestedReturnTo } = await request.json().catch(() => ({}));
     const returnTo = safeReturnTo(requestedReturnTo);
 

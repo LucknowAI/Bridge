@@ -140,6 +140,34 @@ describeDb("login challenge lifecycle", () => {
 
     delete process.env.OTP_MAX_PER_WINDOW;
   });
+
+  it("holds the request limit when requests arrive at the same time", async () => {
+    await query(`delete from login_challenges where email = $1`, [EMAIL]);
+    process.env.OTP_MAX_PER_WINDOW = "3";
+    const results = await Promise.allSettled(
+      Array.from({ length: 10 }, () => issueChallenge({ email: EMAIL, attendeeId, ipAddress: null }))
+    );
+    delete process.env.OTP_MAX_PER_WINDOW;
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(3);
+    const { rows } = await query<{ count: number }>(
+      `select count(*)::int as count from login_challenges where email = $1`, [EMAIL]);
+    expect(rows[0]!.count).toBe(3);
+  });
+
+  it("allows only the attempt limit of comparisons for parallel guesses", async () => {
+    const { code } = await freshChallenge();
+    const wrong = Array.from({ length: 20 }, (_, i) => String(i).padStart(6, "0")).filter((guess) => guess !== code);
+    const results = await Promise.all(wrong.map((guess) => verifyCode(EMAIL, guess)));
+
+    // Exactly MAX guesses were compared; every other request found nothing live.
+    const compared = results.filter((result) => !result.ok && result.reason !== "not_found");
+    expect(compared).toHaveLength(loginChallenges.MAX_CODE_ATTEMPTS);
+    const { rows } = await query<{ attempts: number }>(
+      `select attempts from login_challenges where email = $1`, [EMAIL]);
+    expect(rows[0]!.attempts).toBe(loginChallenges.MAX_CODE_ATTEMPTS);
+    expect((await verifyCode(EMAIL, code)).ok).toBe(false);
+  });
 });
 
 // Owns its attendee: the suite above deletes EMAIL in its afterAll.

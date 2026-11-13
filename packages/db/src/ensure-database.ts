@@ -10,6 +10,7 @@
 import "dotenv/config";
 import pg from "pg";
 import { isMainModule } from "./is-main";
+import { resolveSsl } from "./client";
 
 /**
  * Connect to the `postgres` maintenance database rather than the target, since
@@ -32,10 +33,7 @@ export async function ensureDatabase(name: string): Promise<boolean> {
 
   const client = new pg.Client({
     connectionString: maintenanceUrl(databaseUrl),
-    ssl:
-      process.env.DATABASE_SSL === "disable"
-        ? false
-        : { rejectUnauthorized: false },
+    ssl: resolveSsl(databaseUrl),
   });
 
   await client.connect();

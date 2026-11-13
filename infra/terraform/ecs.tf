@@ -211,25 +211,32 @@ resource "aws_ecs_task_definition" "web" {
       environment = [
         { name = "NODE_ENV", value = "production" },
         { name = "PORT", value = "3000" },
+        { name = "METRICS_NAMESPACE", value = local.metrics_namespace },
         { name = "APP_BASE_URL", value = local.app_base_url },
         { name = "DEFAULT_EVENT_SLUG", value = var.default_event_slug },
+        # One ALB appends the client address to X-Forwarded-For.
+        { name = "TRUSTED_PROXY_HOPS", value = "1" },
         { name = "GEMINI_LLM_MODEL", value = "gemini-3.8-flash" },
         { name = "KEYCLOAK_ISSUER", value = local.keycloak_issuer },
         { name = "KEYCLOAK_INTERNAL_ISSUER", value = local.keycloak_internal_issuer },
         { name = "KEYCLOAK_CLIENT_ID", value = var.keycloak_client_id },
         { name = "KEYCLOAK_GOOGLE_IDP_ALIAS", value = "google" },
         { name = "EMAIL_FROM", value = var.email_from },
-        # RDS enforces TLS (rds.force_ssl), and the AWS CA is not in Node's
-        # default trust store, so verification is relaxed for this hop inside
-        # the VPC. Set DATABASE_CA_CERT to the RDS bundle to tighten it.
-        { name = "DATABASE_SSL", value = "require" },
+        # RDS enforces TLS (rds.force_ssl); the certificate is checked against
+        # the RDS CA bundle baked into the image.
+        { name = "DATABASE_SSL", value = "verify" },
+        { name = "DATABASE_CA_CERT_FILE", value = local.database_ca_file },
       ]
 
       secrets = [
         { name = "DATABASE_URL", valueFrom = local.secret_ref.DATABASE_URL },
         { name = "SESSION_SECRET", valueFrom = local.secret_ref.SESSION_SECRET },
+        { name = "SESSION_SECRET_PREVIOUS", valueFrom = local.secret_ref.SESSION_SECRET_PREVIOUS },
+        { name = "OTP_PEPPER", valueFrom = local.secret_ref.OTP_PEPPER },
         { name = "KEYCLOAK_CLIENT_SECRET", valueFrom = local.secret_ref.KEYCLOAK_CLIENT_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.secret_ref.RESEND_API_KEY },
+        # Only its presence is read: it switches the Google sign-in option on.
+        { name = "GOOGLE_CLIENT_ID", valueFrom = local.secret_ref.GOOGLE_CLIENT_ID },
         { name = "GEMINI_API_KEY", valueFrom = local.secret_ref.GEMINI_API_KEY },
         { name = "UPSTASH_REDIS_REST_URL", valueFrom = local.secret_ref.UPSTASH_REDIS_REST_URL },
         { name = "UPSTASH_REDIS_REST_TOKEN", valueFrom = local.secret_ref.UPSTASH_REDIS_REST_TOKEN },
@@ -319,11 +326,13 @@ resource "aws_ecs_task_definition" "keycloak" {
       environment = [
         { name = "KC_DB", value = "postgres" },
         { name = "KC_DB_URL", value = local.keycloak_jdbc_url },
-        { name = "KC_DB_USERNAME", value = aws_db_instance.main.username },
+        { name = "KC_DB_USERNAME", value = local.db_keycloak_user },
         # Tokens must be issued with the hostname the browser uses, or `iss`
         # will not match what the app verifies.
         { name = "KC_HOSTNAME", value = local.keycloak_public_origin },
-        { name = "KC_HOSTNAME_STRICT", value = "false" },
+        # Supported shared-domain setup: a fixed public hostname, while the app's
+        # back-channel calls over Cloud Map keep their internal URLs.
+        { name = "KC_HOSTNAME_BACKCHANNEL_DYNAMIC", value = "true" },
         # TLS terminates at the ALB, so Keycloak speaks HTTP but must trust the
         # X-Forwarded-* headers to build correct absolute URLs.
         { name = "KC_PROXY_HEADERS", value = "xforwarded" },
@@ -337,12 +346,12 @@ resource "aws_ecs_task_definition" "keycloak" {
       ]
 
       secrets = [
-        { name = "KC_DB_PASSWORD", valueFrom = local.secret_ref.KEYCLOAK_DB_PASSWORD },
-        { name = "KC_BOOTSTRAP_ADMIN_PASSWORD", valueFrom = local.secret_ref.KEYCLOAK_ADMIN_PASSWORD },
+        { name = "KC_DB_PASSWORD", valueFrom = local.identity_secret_ref.KEYCLOAK_DB_PASSWORD },
+        { name = "KC_BOOTSTRAP_ADMIN_PASSWORD", valueFrom = local.identity_secret_ref.KEYCLOAK_ADMIN_PASSWORD },
         # Substituted into realm-export.json during import.
-        { name = "KEYCLOAK_CLIENT_SECRET", valueFrom = local.secret_ref.KEYCLOAK_CLIENT_SECRET },
-        { name = "GOOGLE_CLIENT_ID", valueFrom = local.secret_ref.GOOGLE_CLIENT_ID },
-        { name = "GOOGLE_CLIENT_SECRET", valueFrom = local.secret_ref.GOOGLE_CLIENT_SECRET },
+        { name = "KEYCLOAK_CLIENT_SECRET", valueFrom = local.identity_secret_ref.KEYCLOAK_CLIENT_SECRET },
+        { name = "GOOGLE_CLIENT_ID", valueFrom = local.identity_secret_ref.GOOGLE_CLIENT_ID },
+        { name = "GOOGLE_CLIENT_SECRET", valueFrom = local.identity_secret_ref.GOOGLE_CLIENT_SECRET },
       ]
 
       logConfiguration = {
@@ -416,23 +425,30 @@ resource "aws_ecs_task_definition" "migrate" {
       image     = "${aws_ecr_repository.migrate.repository_url}:latest"
       essential = true
 
-      # Creates Keycloak's database on first run, then applies app migrations.
-      # Both steps are idempotent, so re-running a deploy is safe.
+      # Creates Keycloak's database on first run, applies app migrations, then
+      # creates/updates the runtime and Keycloak logins (after migrations, so
+      # grants cover every table). All steps are idempotent.
       command = [
         "sh", "-c",
-        "npx tsx packages/db/src/ensure-database.ts keycloak && npx tsx packages/db/src/migrate.ts"
+        "npx tsx packages/db/src/ensure-database.ts keycloak && npx tsx packages/db/src/migrate.ts && npx tsx packages/db/src/ensure-roles.ts"
       ]
 
       environment = [
         { name = "NODE_ENV", value = "production" },
-        { name = "DATABASE_SSL", value = "require" },
+        { name = "DATABASE_SSL", value = "verify" },
+        { name = "DATABASE_CA_CERT_FILE", value = local.database_ca_file },
+        { name = "DATABASE_RUNTIME_USER", value = local.db_runtime_user },
+        { name = "KEYCLOAK_DB_USER", value = local.db_keycloak_user },
+        { name = "KEYCLOAK_DB_NAME", value = "keycloak" },
         # Seeding is for local development only; production data comes from the
         # Excel importer.
         { name = "SEED_ON_MIGRATE", value = "false" },
       ]
 
       secrets = [
-        { name = "DATABASE_URL", valueFrom = local.secret_ref.DATABASE_URL },
+        { name = "DATABASE_URL", valueFrom = local.migrate_secret_ref.DATABASE_ADMIN_URL },
+        { name = "DATABASE_RUNTIME_PASSWORD", valueFrom = local.migrate_secret_ref.DATABASE_RUNTIME_PASSWORD },
+        { name = "KEYCLOAK_DB_PASSWORD", valueFrom = local.migrate_secret_ref.KEYCLOAK_DB_PASSWORD },
       ]
 
       logConfiguration = {
@@ -464,7 +480,9 @@ resource "aws_ecs_task_definition" "worker" {
       essential = true
       environment = [
         { name = "NODE_ENV", value = "production" },
-        { name = "DATABASE_SSL", value = "require" },
+        { name = "METRICS_NAMESPACE", value = local.metrics_namespace },
+        { name = "DATABASE_SSL", value = "verify" },
+        { name = "DATABASE_CA_CERT_FILE", value = local.database_ca_file },
         { name = "GEMINI_LLM_MODEL", value = "gemini-3.8-flash" },
         { name = "EMBEDDING_PROVIDER", value = "gemini" },
       ]
