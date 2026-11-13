@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   issueChallenge: vi.fn(), sendLoginEmail: vi.fn(), verifyCode: vi.fn(),
   ensureUser: vi.fn(), setSession: vi.fn(), exchangeCodeForTokens: vi.fn(),
   verifyIdToken: vi.fn(), unsealOAuthState: vi.fn(), sealSession: vi.fn(),
-  buildAuthorizationUrl: vi.fn(), sealOAuthState: vi.fn(),
+  buildAuthorizationUrl: vi.fn(), sealOAuthState: vi.fn(), verifyToken: vi.fn(),
 }));
 
 vi.mock("@match-maker/db", () => ({
@@ -131,5 +131,40 @@ describe("Google sign-in", () => {
     const response = await callback(callbackRequest());
     expect(response.headers.get("location")).toContain("error=state_mismatch");
     expect(mocks.exchangeCodeForTokens).not.toHaveBeenCalled();
+  });
+});
+
+describe("failed sign-in keeps the event destination", () => {
+  it("returns a cancelled Google consent to login for the same event", async () => {
+    const response = await callback(new NextRequest("http://localhost:3000/auth/callback?error=access_denied", {
+      headers: { cookie: "mb_oauth=sealed-state" },
+    }));
+    expect(response.headers.get("location")).toBe("http://localhost:3000/login?error=provider&returnTo=%2Fe%2Fdemo");
+    expect(response.cookies.get("mb_oauth")?.value).toBe("");
+  });
+
+  it("keeps the destination when the roster rejects a Google account", async () => {
+    mocks.findByEmail.mockResolvedValue(null);
+    const response = await callback(callbackRequest());
+    expect(response.headers.get("location")).toBe("http://localhost:3000/login?error=unregistered&returnTo=%2Fe%2Fdemo");
+  });
+
+  it("keeps the destination when token exchange fails", async () => {
+    mocks.exchangeCodeForTokens.mockRejectedValue(new Error("keycloak down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await callback(callbackRequest());
+    expect(response.headers.get("location")).toBe("http://localhost:3000/login?error=verification_failed&returnTo=%2Fe%2Fdemo");
+  });
+
+  it("keeps the magic link destination when the link has expired", async () => {
+    mocks.verifyToken.mockResolvedValue({ ok: false, reason: "expired" });
+    const response = await callback(new NextRequest("http://localhost:3000/auth/callback?token=old&returnTo=%2Fe%2Fdemo%2Fprofile"));
+    expect(response.headers.get("location")).toBe("http://localhost:3000/login?error=expired&returnTo=%2Fe%2Fdemo%2Fprofile");
+  });
+
+  it("keeps the destination when Google start rejects an uninvited email", async () => {
+    mocks.findByEmail.mockResolvedValue(null);
+    const response = await startGoogle(new NextRequest("http://localhost:3000/api/auth/google/start?email=x%40example.com&returnTo=%2Fe%2Fdemo"));
+    expect(response.headers.get("location")).toBe("http://localhost:3000/login?error=unregistered&returnTo=%2Fe%2Fdemo");
   });
 });
