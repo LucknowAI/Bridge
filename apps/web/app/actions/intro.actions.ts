@@ -6,6 +6,7 @@ import { respondToIntro } from "../../src/application/use-cases/respond-to-intro
 import { shareVenueZone } from "../../src/application/use-cases/share-venue-zone";
 import { getContainer } from "../../src/composition/container";
 import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
+import { answerLocation, requestLocation } from "../../src/application/use-cases/location-requests";
 import { getSession } from "../../lib/session";
 import { runFormAction, type FormState } from "../../lib/form-state";
 
@@ -75,8 +76,11 @@ export async function getParticipantConnections(eventSlug: string) {
   const event = await container.events.findByEventSlug(eventSlug);
   if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
   assertEventAllows(event.status, "viewMatches");
-  const requests = await container.intros.listForParticipant(event.id, session.attendeeId);
-  const revealed = await container.intros.getRevealedContacts(event.id, session.attendeeId);
+  const [requests, revealed, locationRequests] = await Promise.all([
+    container.intros.listForParticipant(event.id, session.attendeeId),
+    container.intros.getRevealedContacts(event.id, session.attendeeId),
+    container.locations.forParticipant(event.id, session.attendeeId),
+  ]);
   const contacts = new Map(revealed.map(({ intro, contact }) => [intro.id, contact]));
   return Promise.all(requests.map(async (intro) => {
     const otherId = intro.requesterId === session.attendeeId ? intro.recipientId : intro.requesterId;
@@ -89,6 +93,35 @@ export async function getParticipantConnections(eventSlug: string) {
       incoming: intro.recipientId === session.attendeeId,
       participant: { id: otherId, name: other?.name ?? "Participant", designation: other?.designation, domain: other?.domain },
       contact: contacts.get(intro.id) ?? null,
+      locationAsked: locationRequests.find((request) => request.introId === intro.id && request.direction === "outgoing") ?? null,
+      locationIncoming: locationRequests.find((request) => request.introId === intro.id && request.direction === "incoming" && request.status === "pending") ?? null,
     };
   }));
+}
+
+async function participantContext(eventSlug: string, action: "shareZone") {
+  const session = await getSession();
+  if (!session) throw new Error("Sign in first");
+  const container = getContainer();
+  const event = await container.events.findByEventSlug(eventSlug);
+  if (!event || !(await container.participants.hasEventAccess(event.id, session.attendeeId))) throw new Error("You are not registered for this event");
+  assertEventAllows(event.status, action);
+  return { session, container, event };
+}
+
+export async function requestLocationAction(eventSlug: string, introId: string, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, async () => {
+    const { session, container, event } = await participantContext(eventSlug, "shareZone");
+    await requestLocation({ eventId: event.id, introId, requesterId: session.attendeeId }, container);
+    redirect(`/e/${eventSlug}/connections?asked=1#intro-${introId}`);
+  });
+}
+
+export async function answerLocationAction(eventSlug: string, introId: string, requestId: string, share: boolean, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, async () => {
+    const { session, container, event } = await participantContext(eventSlug, "shareZone");
+    const zone = share ? String(formData.get("venueZone") ?? "") : null;
+    await answerLocation({ eventId: event.id, requestId, recipientId: session.attendeeId, zone, allowedZones: event.zones }, container);
+    redirect(`/e/${eventSlug}/connections?${share ? "replied=1" : "declined=1"}#intro-${introId}`);
+  });
 }

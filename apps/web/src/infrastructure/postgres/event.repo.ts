@@ -1,4 +1,4 @@
-import { attendees, events, query } from "@match-maker/db";
+import { events, query } from "@match-maker/db";
 import type { EventRepository, EventRecord } from "../../application/ports/event-repository";
 
 export class PostgresEventRepository implements EventRepository {
@@ -11,8 +11,11 @@ export class PostgresEventRepository implements EventRepository {
   findOrganization(slug: string) {
     return events.findOrganization(slug);
   }
-  listForOrganization(organizationSlug: string) {
-    return events.listForOrganization(organizationSlug);
+  listForOrganization(organizationSlug: string, viewerId?: string) {
+    return events.listForOrganization(organizationSlug, viewerId);
+  }
+  organizerRoles(eventId: string, attendeeId: string) {
+    return events.organizerRoles(eventId, attendeeId);
   }
   hasOrganizationAccess(organizationSlug: string, attendeeId: string) {
     return events.hasOrganizationAccess(organizationSlug, attendeeId);
@@ -53,14 +56,8 @@ export class PostgresEventRepository implements EventRepository {
     return events.rosterState(eventId, attendeeId);
   }
 
-  async importRoster(eventId: string, records: Parameters<EventRepository["importRoster"]>[1]) {
-    let upserted = 0;
-    for (let offset = 0; offset < records.length; offset += 100) {
-      upserted += await attendees.upsertMany(records.slice(offset, offset + 100));
-    }
-    const rows = await attendees.findIdsByEmails(records.map((record) => record.email));
-    const attached = await events.attachRoster(eventId, rows.map((row) => row.id));
-    return { upserted, attached };
+  importRoster(eventId: string, records: Parameters<EventRepository["importRoster"]>[1]) {
+    return events.importRoster(eventId, records);
   }
 
   async analytics(eventId: string) {

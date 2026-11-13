@@ -1,33 +1,18 @@
 import { NextResponse } from "next/server";
-import { buildLogoutUrl } from "@match-maker/auth";
-import { clearSession, getSession } from "@/lib/session";
+import { clearSession, endIdentityProviderSession, getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
  * Sign out. Clears the local session, and for Google logins also ends the
- * Keycloak SSO session — otherwise the next sign-in would silently re-use it
- * and appear to ignore the logout.
+ * Keycloak SSO session server-side — otherwise the next sign-in would silently
+ * re-use it and appear to ignore the logout. Same behaviour as the Sign out
+ * button (signOutCurrentUser).
  */
-export async function POST(request) {
+export async function POST() {
   const session = await getSession();
   await clearSession();
-
-  const origin = process.env.APP_BASE_URL || new URL(request.url).origin;
-
-  if (session?.method === "google") {
-    try {
-      return NextResponse.json({
-        ok: true,
-        redirectTo: await buildLogoutUrl(`${origin}/login`),
-      });
-    } catch (err) {
-      // Keycloak being unreachable must not trap the user in a signed-in state;
-      // the local cookie is already gone.
-      console.error("[auth/logout] could not build Keycloak logout URL:", err);
-    }
-  }
-
+  await endIdentityProviderSession(session);
   return NextResponse.json({ ok: true, redirectTo: "/login" });
 }

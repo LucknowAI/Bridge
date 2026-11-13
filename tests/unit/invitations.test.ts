@@ -35,7 +35,7 @@ function ports(targets: Array<{ attendee_id: string; email: string; name: string
     invitationTargets: vi.fn().mockResolvedValue(targets),
     recordInvitation: vi.fn().mockResolvedValue(undefined),
     setRevoked: vi.fn().mockResolvedValue(true),
-    isOrganizer: vi.fn().mockResolvedValue(true),
+    organizerRoles: vi.fn().mockResolvedValue({ event: "owner", organization: null }),
   };
   const notifications = {
     invitation: vi.fn(async ({ email }: { email: string }) => {
@@ -76,11 +76,22 @@ describe("setAttendeeAccess", () => {
 
   it("refuses anyone who is not an organizer of the event", async () => {
     const { events, notifications, raw } = ports([{ attendee_id: "a", email: "a@example.com", name: "A" }]);
-    raw.events.isOrganizer.mockResolvedValue(false);
+    raw.events.organizerRoles.mockResolvedValue({ event: null, organization: null });
     await expect(setAttendeeAccess({ eventId: "event", organizerId: "x", attendeeId: "a", revoked: true }, { events })).rejects.toThrow(/not an organizer/);
     await expect(sendInvitations({ ...event, organizerId: "x" }, { events, notifications })).rejects.toThrow(/not an organizer/);
     expect(raw.events.setRevoked).not.toHaveBeenCalled();
     expect(raw.notifications.invitation).not.toHaveBeenCalled();
+  });
+});
+
+describe("audit records", () => {
+  it("records invitations sent and access changes", async () => {
+    const { events, notifications } = ports([{ attendee_id: "a", email: "a@example.com", name: "A" }]);
+    const audit = { record: vi.fn(async () => {}), recent: vi.fn() };
+    await sendInvitations(event, { events, notifications, audit });
+    await setAttendeeAccess({ eventId: "event", organizerId: "organizer", attendeeId: "a", revoked: true }, { events, audit });
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "invitations.sent", actorId: "organizer", details: expect.objectContaining({ sent: 1 }) }));
+    expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "access.removed", subjectId: "a" }));
   });
 });
 

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSessionConfig, sessionCookieOptions, unsealSession } from "@match-maker/auth";
+import { getSessionConfig, isSessionActive, sessionCookieOptions, unsealSession } from "@match-maker/auth";
 import { postLoginPath } from "./lib/safe-return-to";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -24,7 +24,10 @@ async function loginRedirect(request: NextRequest) {
   if (!raw) return NextResponse.next();
 
   const { searchParams } = request.nextUrl;
-  const session = await unsealSession(raw);
+  const unsealed = await unsealSession(raw);
+  // Same rule as getSession, or a revoked session would loop between /login
+  // and the page that sent it there.
+  const session = unsealed && (await isSessionActive(unsealed)) ? unsealed : null;
   if (session && !searchParams.has("error")) {
     return NextResponse.redirect(new URL(postLoginPath(searchParams.get("returnTo")), request.url));
   }

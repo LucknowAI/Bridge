@@ -39,6 +39,33 @@ describe("session cookie", () => {
     process.env.SESSION_SECRET = SECRET;
   });
 
+  it("keeps sessions sealed before a rotation, while new ones use the new secret", async () => {
+    const before = await sealSession(session);
+    const rotated = "the-new-session-secret-after-rotation-123456";
+    process.env.SESSION_SECRET = rotated;
+    process.env.SESSION_SECRET_PREVIOUS = SECRET;
+    try {
+      expect(await unsealSession(before)).toMatchObject(session);
+      const after = await sealSession(session);
+      // Once the old secret is dropped, only cookies sealed after the rotation still work.
+      delete process.env.SESSION_SECRET_PREVIOUS;
+      expect(await unsealSession(after)).toMatchObject(session);
+      expect(await unsealSession(before)).toBeNull();
+    } finally {
+      process.env.SESSION_SECRET = SECRET;
+      delete process.env.SESSION_SECRET_PREVIOUS;
+    }
+  });
+
+  it("refuses a short previous secret", async () => {
+    process.env.SESSION_SECRET_PREVIOUS = "too-short";
+    try {
+      await expect(sealSession(session)).rejects.toThrow(/SESSION_SECRET_PREVIOUS/);
+    } finally {
+      delete process.env.SESSION_SECRET_PREVIOUS;
+    }
+  });
+
   it("rejects a tampered token", async () => {
     const sealed = await sealSession(session);
     const parts = sealed.split(".");

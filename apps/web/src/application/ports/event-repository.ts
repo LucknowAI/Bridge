@@ -1,3 +1,5 @@
+import type { OrganizerRoles } from "../../domain/shared/organizer-permissions";
+
 export interface EventRecord {
   id: string;
   organization_id: string;
@@ -25,11 +27,21 @@ export interface RosterAttendeeInput {
   most_impressive_build: string | null;
 }
 
+export interface RosterImportResult {
+  created: number;
+  attached: number;
+  alreadyOnRoster: number;
+  keptExisting: number;
+  phoneConflicts: number;
+}
+
 export interface EventRepository {
   findBySlug(organizationSlug: string, eventSlug: string): Promise<EventRecord | null>;
   findByEventSlug(eventSlug: string): Promise<EventRecord | null>;
   findOrganization(slug: string): Promise<{ id: string; name: string; slug: string } | null>;
-  listForOrganization(organizationSlug: string): Promise<EventRecord[]>;
+  /** With viewerId, only the events that person may open. */
+  listForOrganization(organizationSlug: string, viewerId?: string): Promise<EventRecord[]>;
+  organizerRoles(eventId: string, attendeeId: string): Promise<OrganizerRoles>;
   hasOrganizationAccess(organizationSlug: string, attendeeId: string): Promise<boolean>;
   isOrganizer(eventId: string, attendeeId: string): Promise<boolean>;
   create(input: { organizationId: string; organizerId: string; name: string; slug: string; description?: string | null }): Promise<EventRecord>;
@@ -37,7 +49,7 @@ export interface EventRepository {
   roster(eventId: string): Promise<Array<Record<string, unknown>>>;
   attachRoster(eventId: string, attendeeIds: string[]): Promise<number>;
   participantIds(eventId: string): Promise<string[]>;
-  importRoster(eventId: string, records: RosterAttendeeInput[]): Promise<{ upserted: number; attached: number }>;
+  importRoster(eventId: string, records: RosterAttendeeInput[]): Promise<RosterImportResult>;
   analytics(eventId: string): Promise<{
     roster: number; invited: number; claimed: number; profiles: number; removed: number;
     matches: number; pendingIntros: number; acceptedIntros: number;

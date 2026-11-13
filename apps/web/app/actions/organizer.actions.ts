@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { createEvent, importEventRoster, queueEventMatches, updateEvent } from "../../src/application/use-cases/manage-event";
+import { configureProfileForm, createEvent, importEventRoster, queueEventMatches, updateEvent } from "../../src/application/use-cases/manage-event";
+import { PROFILE_FIELD_KEYS, type ProfileFieldKey, type ProfileFieldSetting } from "../../src/domain/participant/profile-form";
 import { getContainer } from "../../src/composition/container";
 import { assertEventAllows } from "../../src/domain/shared/event-lifecycle";
 import { LIMITS, ValidationError } from "../../src/domain/shared/validation";
@@ -42,8 +43,12 @@ async function importRoster(organizationSlug: string, eventSlug: string, formDat
   const event = await container.events.findBySlug(organizationSlug, eventSlug);
   if (!event) throw new Error("Event not found");
   const { records, skipped } = parseRosterWorkbook(await file.arrayBuffer());
-  const result = await importEventRoster({ eventId: event.id, organizerId: session.attendeeId, records }, container.events);
-  redirect(`/orgs/${organizationSlug}/events/${eventSlug}/roster?imported=${result.attached}&skipped=${skipped}`);
+  const result = await importEventRoster({ eventId: event.id, organizerId: session.attendeeId, records }, container.events, container.audit);
+  const report = new URLSearchParams({
+    imported: String(result.attached), skipped: String(skipped), already: String(result.alreadyOnRoster),
+    kept: String(result.keptExisting), phones: String(result.phoneConflicts),
+  });
+  redirect(`/orgs/${organizationSlug}/events/${eventSlug}/roster?${report}`);
 }
 
 export async function updateEventAction(organizationSlug: string, eventSlug: string, _state: FormState, formData: FormData): Promise<FormState> {
@@ -68,7 +73,7 @@ async function saveEvent(organizationSlug: string, eventSlug: string, formData: 
     status: status as "draft" | "open" | "closed",
     intents,
     zones,
-  }, container.events);
+  }, container.events, container.audit);
   redirect(`/orgs/${organizationSlug}/events/${eventSlug}?saved=1`);
 }
 
@@ -83,7 +88,7 @@ async function queueMatches(organizationSlug: string, eventSlug: string) {
   const event = await container.events.findBySlug(organizationSlug, eventSlug);
   if (!event) throw new Error("Event not found");
   assertEventAllows(event.status, "computeMatches");
-  if (event.status === "draft") await updateEvent({ eventId: event.id, organizerId: session.attendeeId, status: "open" }, container.events);
+  if (event.status === "draft") await updateEvent({ eventId: event.id, organizerId: session.attendeeId, status: "open" }, container.events, container.audit);
   const queued = await queueEventMatches({ eventId: event.id, organizerId: session.attendeeId }, container.events, container.enqueueEmbedding);
   redirect(`/orgs/${organizationSlug}/events/${eventSlug}/matching?queued=${queued}`);
 }
@@ -118,5 +123,22 @@ export async function setAttendeeAccessAction(organizationSlug: string, eventSlu
     if (!event) throw new Error("Event not found");
     await setAttendeeAccess({ eventId: event.id, organizerId: session.attendeeId, attendeeId, revoked }, container);
     redirect(`/orgs/${organizationSlug}/events/${eventSlug}/roster?access=${revoked ? "removed" : "restored"}`);
+  });
+}
+
+export async function updateProfileFormAction(organizationSlug: string, eventSlug: string, _state: FormState, formData: FormData): Promise<FormState> {
+  return runFormAction(formData, async () => {
+    const session = await getSession();
+    if (!session) throw new Error("Sign in as an organizer first");
+    const container = getContainer();
+    const event = await container.events.findBySlug(organizationSlug, eventSlug);
+    if (!event) throw new Error("Event not found");
+    const fields = Object.fromEntries(PROFILE_FIELD_KEYS.map((key) => [key, {
+      label: String(formData.get(`${key}.label`) ?? ""),
+      shown: formData.get(`${key}.shown`) === "on",
+      required: formData.get(`${key}.required`) === "on",
+    }])) as Record<ProfileFieldKey, ProfileFieldSetting>;
+    await configureProfileForm({ eventId: event.id, organizerId: session.attendeeId, fields, currentConfig: event.form_config }, container.events, container.audit);
+    redirect(`/orgs/${organizationSlug}/events/${eventSlug}?form=saved`);
   });
 }
