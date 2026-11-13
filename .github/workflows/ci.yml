@@ -30,6 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The migration gate compares with the base commit.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -46,6 +49,12 @@ jobs:
 
       - name: Unit tests
         run: npx vitest run tests/unit
+
+      # Migrations run before the new code starts, and a rollback runs the
+      # previous image on the migrated schema: released migrations never
+      # change and new ones only expand.
+      - name: Migrations are safe to roll back from
+        run: npx tsx tools/check-migrations.ts "${{ github.event.pull_request.base.sha || github.event.before }}"
 
   integration:
     name: Integration tests

@@ -15,3 +15,4 @@ export * as housekeeping from "./repositories/housekeeping";
 export * as audit from "./repositories/audit";
 export * as modelUsage from "./repositories/model-usage";
 export * as outbox from "./repositories/outbox";
+export * as pipelineHealth from "./repositories/pipeline-health";
