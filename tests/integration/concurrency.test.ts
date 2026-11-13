@@ -10,6 +10,7 @@ import { migrate } from "../../packages/db/src/migrate";
 import { PostgresIntroRepository } from "../../apps/web/src/infrastructure/postgres/intro.repo";
 import { PostgresLocationRepository } from "../../apps/web/src/infrastructure/postgres/location.repo";
 import { PostgresParticipantRepository } from "../../apps/web/src/infrastructure/postgres/participant.repo";
+import { PostgresMatchRepository } from "../../apps/web/src/infrastructure/postgres/match.repo";
 import { requestIntro } from "../../apps/web/src/application/use-cases/request-intro";
 import { Intent } from "../../apps/web/src/domain/participant/intent";
 
@@ -23,6 +24,7 @@ describeDb("concurrent actions", () => {
   const intros = new PostgresIntroRepository();
   const locations = new PostgresLocationRepository();
   const participants = new PostgresParticipantRepository();
+  const matches = new PostgresMatchRepository();
   const ids: Record<string, string> = {};
   let eventId: string;
 
@@ -86,6 +88,19 @@ describeDb("concurrent actions", () => {
     const input = { eventId, introId: intro.id, requesterId: ids.p10, recipientId: ids.p11 };
     const created = await Promise.all([locations.create(input), locations.create(input)]);
     expect(created.filter(Boolean)).toHaveLength(1);
+  });
+
+  it("saves match lists that name each other at the same time without deadlocking", async () => {
+    const group = ["p0", "p1", "p2", "p3", "p4", "p5"];
+    const profiles = await Promise.all(group.map((key) => participants.findProfile(eventId, ids[key])));
+    const listFor = (key: string) => profiles.filter((profile) => profile!.attendeeId !== ids[key])
+      .map((profile) => ({ participant: profile!, score: 50, scoreBreakdown: {}, mutualInterest: false, reason: null }));
+    const revisionOf = (key: string) => profiles.find((profile) => profile!.attendeeId === ids[key])!.revision!;
+    for (let round = 0; round < 5; round++) {
+      const results = await settle(group.map((key) => matches.save(eventId, ids[key], listFor(key), "race", revisionOf(key))));
+      expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+      expect(results.map((result) => (result as PromiseFulfilledResult<boolean>).value)).toEqual(group.map(() => true));
+    }
   });
 
   it("imports overlapping roster sheets at once without duplicating anyone", async () => {

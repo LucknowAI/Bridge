@@ -97,6 +97,7 @@ export class PostgresParticipantRepository implements ParticipantRepository {
     embedding?: number[] | null;
     terms?: string[];
     filters?: SearchFilters;
+    welcomedIntents?: string[] | null;
     /** The model that produced `embedding`; only candidates embedded by it are ranked by vector. */
     embeddingModel?: string | null;
     limit?: number;
@@ -110,13 +111,14 @@ export class PostgresParticipantRepository implements ParticipantRepository {
           and ($5::text is null or p.intent = $5)
           and ($6::text is null or lower(p.domain) = lower($6))
           and ($7::text is null or ${SEARCH_DOCUMENT} @@ to_tsquery('simple', $7))
+          and ($9::text[] is null or p.intent = any($9::text[]))
         order by case when $3::vector is not null and p.embedding is not null and p.embedding_model is not distinct from $8 then 0 else 1 end,
                  case when p.embedding_model is not distinct from $8 then p.embedding <=> $3::vector end nulls last,
                  case when $7::text is null then 0 else ts_rank(${SEARCH_DOCUMENT}, to_tsquery('simple', $7)) end desc,
                  a.name asc
         limit $4`,
       [input.eventId, input.excludeAttendeeId, vector, Math.max(1, Math.min(100, input.limit ?? 50)),
-        input.filters?.intent ?? null, input.filters?.domain ?? null, tsQuery, input.embeddingModel ?? null]
+        input.filters?.intent ?? null, input.filters?.domain ?? null, tsQuery, input.embeddingModel ?? null, input.welcomedIntents ?? null]
     );
     return rows.map(mapProfile);
   }

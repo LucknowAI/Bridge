@@ -5,6 +5,8 @@ import { processEmbedJob } from "./embed.worker";
 import { processMatchJob } from "./match.worker";
 import { sweepIfDue } from "./housekeeping.worker";
 import { processNotification } from "./notification.worker";
+import { reportHealthIfDue } from "./metrics.worker";
+import { getContainer } from "../../../apps/web/src/composition/container";
 
 let stopping = false;
 process.on("SIGINT", () => { stopping = true; });
@@ -15,6 +17,7 @@ async function main() {
   console.info(`[worker] embedding and matching queue started (version ${process.env.APP_VERSION || "dev"})`);
   while (!stopping) {
     await sweepIfDue();
+    await reportHealthIfDue(getContainer().metrics);
     const embedded = await processEmbedJob();
     const matched = await processMatchJob();
     const notified = await processNotification();
