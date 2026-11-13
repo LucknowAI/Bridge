@@ -24,6 +24,7 @@ const CODE_LENGTH = 6;
 const ERROR_MESSAGES = {
   unregistered: "That account is not on the attendee list.",
   provider: "Google sign-in failed. Please try again.",
+  google_unavailable: "Google sign-in isn't available yet. Please use an email code.",
   state_mismatch: "Your sign-in session expired. Please start again.",
   verification_failed: "We couldn't verify that sign-in. Please try again.",
   invalid_callback: "That sign-in link is incomplete. Please try again.",
@@ -99,7 +100,7 @@ function StatusPill({ type, text }) {
   );
 }
 
-export default function Login({ onAuthSuccess }) {
+export default function Login({ onAuthSuccess, googleEnabled = false }) {
   const searchParams = useSearchParams();
   const returnTo = safeReturnTo(searchParams.get("returnTo"));
   const [step, setStep] = useState("choose");
@@ -264,7 +265,7 @@ export default function Login({ onAuthSuccess }) {
                   <div style={{ marginLeft: "auto", color: "#52525b", fontSize: 18 }}>›</div>
                 </button>
 
-                <a className="method-card" href={`/api/auth/google/start?returnTo=${encodeURIComponent(returnTo)}`}>
+                {googleEnabled && <a className="method-card" href={`/api/auth/google/start?returnTo=${encodeURIComponent(returnTo)}`}>
                   <div style={{ width: 44, height: 44, borderRadius: 12, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
                       <path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.32 2.98-7.36Z" />
@@ -278,7 +279,7 @@ export default function Login({ onAuthSuccess }) {
                     <div style={{ fontSize: 12, color: "#71717a" }}>Choose the Google account on your invitation</div>
                   </div>
                   <div style={{ marginLeft: "auto", color: "#52525b", fontSize: 18 }} aria-hidden="true">›</div>
-                </a>
+                </a>}
               </div>
 
               {status && <StatusPill type={status.type} text={status.text} />}

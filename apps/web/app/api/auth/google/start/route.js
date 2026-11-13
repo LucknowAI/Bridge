@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { attendees } from "@match-maker/db";
 import { canReturnToPath } from "@/lib/session";
-import { safeReturnTo } from "@/lib/safe-return-to";
+import { loginErrorPath, safeReturnTo } from "@/lib/safe-return-to";
 import {
   buildAuthorizationUrl,
   createPkce,
   randomUrlSafe,
   sealOAuthState,
   sessionCookieOptions,
+  isGoogleSignInEnabled,
   OAUTH_COOKIE_NAME,
   OAUTH_COOKIE_MAX_AGE,
 } from "@match-maker/auth";
@@ -26,6 +27,9 @@ export async function GET(request) {
   const url = new URL(request.url);
   const email = url.searchParams.get("email")?.toLowerCase().trim() || "";
   const returnTo = safeReturnTo(url.searchParams.get("returnTo"));
+  if (!isGoogleSignInEnabled()) {
+    return NextResponse.redirect(new URL(loginErrorPath("google_unavailable", returnTo), url.origin));
+  }
 
   try {
     // The browser already checked the roster, but that check is advisory —
@@ -33,7 +37,7 @@ export async function GET(request) {
     if (email) {
       const attendee = await attendees.findByEmail(email);
       if (!attendee || !(await canReturnToPath(returnTo, attendee.id))) {
-        return NextResponse.redirect(new URL("/login?error=unregistered", url.origin));
+        return NextResponse.redirect(new URL(loginErrorPath("unregistered", returnTo), url.origin));
       }
     }
 
@@ -58,7 +62,7 @@ export async function GET(request) {
     return response;
   } catch (err) {
     console.error("[auth/google/start]", err);
-    return NextResponse.redirect(new URL("/login?error=provider", url.origin));
+    return NextResponse.redirect(new URL(loginErrorPath("provider", returnTo), url.origin));
   }
 }
 
