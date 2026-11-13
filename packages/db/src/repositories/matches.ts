@@ -7,7 +7,11 @@ export interface RecordedMatch {
   reason: string | null;
 }
 
-/** Persist one matchmaking run so results survive a page reload. */
+/**
+ * Persist one matchmaking run so results survive a page reload.
+ * @deprecated Retired with the global /api/match (R07): not scoped to an event.
+ * Event matching uses event_matches through apps/web's MatchRepository.
+ */
 export async function recordMatches(
   userSubject: string,
   matches: RecordedMatch[]
@@ -28,6 +32,10 @@ export async function recordMatches(
   return rowCount ?? 0;
 }
 
+/**
+ * @deprecated Retired with the global /api/match (R07): not scoped to an event.
+ * Event matching uses event_matches through apps/web's MatchRepository.
+ */
 export async function listForUser(
   userSubject: string,
   limit = 50

@@ -2,6 +2,7 @@ export {
   getAuthConfig,
   getSessionConfig,
   getOtpConfig,
+  isGoogleSignInEnabled,
   type AuthConfig,
   type SessionConfig,
   type OtpConfig,
@@ -29,6 +30,10 @@ export {
   buildLogoutUrl,
   ensureUser,
   findUserByEmail,
+  isUserEnabled,
+  setUserEnabled,
+  logoutUser,
+  deleteUser,
   resetCaches,
   type Pkce,
   type TokenSet,
@@ -48,3 +53,4 @@ export {
   type VerifyResult,
   type VerifyFailure,
 } from "./otp";
+export { isSessionActive } from "./session-state";

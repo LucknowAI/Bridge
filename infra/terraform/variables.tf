@@ -54,7 +54,7 @@ variable "enable_nat_gateway" {
 
 # ── DNS / TLS ─────────────────────────────────────────────────
 variable "domain_name" {
-  description = "Public hostname for the app, e.g. bridge.example.com. Leave empty to serve on the ALB's own DNS name over HTTP only."
+  description = "Public hostname for the app, e.g. bridge.example.com. Required (with acm_certificate_arn) when environment is prod; leave empty only for a non-prod evaluation stack served over HTTP."
   type        = string
   default     = ""
 }
@@ -69,6 +69,12 @@ variable "acm_certificate_arn" {
   description = "ARN of an existing ACM certificate covering the domains above. Required for HTTPS."
   type        = string
   default     = ""
+}
+
+variable "keycloak_admin_cidrs" {
+  description = "IPv4 CIDR blocks allowed to reach the Keycloak admin console (/admin) through the load balancer. Empty keeps it unreachable from the internet; use ECS Exec port forwarding instead."
+  type        = list(string)
+  default     = []
 }
 
 variable "route53_zone_id" {
@@ -298,4 +304,21 @@ variable "enable_container_insights" {
   description = "Enable ECS Container Insights. Adds CloudWatch cost."
   type        = bool
   default     = true
+}
+
+variable "session_secret_active" {
+  description = "Which session-secret slot seals new cookies (a or b); the other is still accepted. Flip it, with -replace of the newly active slot, to rotate without signing anyone out."
+  type        = string
+  default     = "a"
+
+  validation {
+    condition     = contains(["a", "b"], var.session_secret_active)
+    error_message = "session_secret_active must be \"a\" or \"b\"."
+  }
+}
+
+variable "image_promotion_source" {
+  description = "Stack whose images production may promote unchanged, e.g. \"match-maker-staging\" (same account and region). Empty disables promotion."
+  type        = string
+  default     = ""
 }

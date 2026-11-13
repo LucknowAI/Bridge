@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { getContainer } from "@/src/composition/container";
 import { signOutCurrentUser } from "../../../actions/participant.actions";
+import { eventAllows } from "@/src/domain/shared/event-lifecycle";
 
 export default async function EventLandingPage({ params }: { params: Promise<{ eventSlug: string }> }) {
   const { eventSlug } = await params;
@@ -23,22 +24,32 @@ export default async function EventLandingPage({ params }: { params: Promise<{ e
   }
 
   if (!(await container.participants.hasEventAccess(event.id, session.attendeeId))) {
+    const removed = await container.events.rosterState(event.id, session.attendeeId) === "revoked";
     return <main style={shell}>
       <span style={eyebrow}>MR. BRIDGE · EVENT NETWORKING</span>
       <h1>{event.name}</h1>
-      <p>This account is not on the event roster. Ask the organizer to add your registered e-mail.</p>
+      <p>{removed
+        ? "The organizer removed this account's access to the event. Contact them if you think this is a mistake."
+        : "This account is not on the event roster. If you were invited with a different e-mail or phone, sign out and use that one, or ask the organizer to add this e-mail."}</p>
       <form action={signOutCurrentUser}><button style={button} type="submit">Sign out</button></form>
     </main>;
   }
 
+  await container.events.markClaimed(event.id, session.attendeeId);
   const profile = await container.participants.findProfile(event.id, session.attendeeId);
   if (event.status === "open") redirect(profile?.profileComplete ? `/e/${eventSlug}/matches` : `/e/${eventSlug}/profile`);
 
   return <main style={shell}>
     <span style={eyebrow}>{event.status.toUpperCase()}</span>
     <h1>{event.name}</h1>
-    <p>This event is not accepting profiles right now.</p>
-    <Link style={button} href={`/e/${eventSlug}/matches`}>View your matches</Link>
+    {eventAllows(event.status, "viewMatches")
+      ? <>
+        <p>This event has closed. Your matches and accepted connections stay available, and you can still reply to pending introductions.</p>
+        <Link style={button} href={`/e/${eventSlug}/matches`}>View your matches</Link>{" "}
+        <Link style={button} href={`/e/${eventSlug}/connections`}>Connections</Link>
+      </>
+      : <p>This event has not opened yet. Come back when the organizer opens registration.</p>}
+    <form action={signOutCurrentUser} style={{ marginTop: 28 }}><button className="link-button" type="submit">Sign out</button></form>
   </main>;
 }
 

@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * RETIRED (R07) - kept for reference only; nothing imports or routes to it.
+ * This was the original single-page matcher. It calls /api/domains and
+ * /api/match, which now answer 410 Gone. Participants use the event pages
+ * under app/(participant)/e/[eventSlug] instead. Do not wire it back up.
+ */
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 

@@ -27,6 +27,13 @@ const nextConfig = {
 
   poweredByHeader: false,
 
+  // Server actions accept 1 MB by default, which rejected rosters long before
+  // the 10 MB roster limit (LIMITS.rosterBytes). Allow the file plus
+  // multipart overhead; the action itself enforces the exact limit.
+  experimental: {
+    serverActions: { bodySizeLimit: "11mb" },
+  },
+
   async headers() {
     return [
       {
@@ -35,6 +42,10 @@ const nextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Browsers that have seen the HTTPS site never fall back to HTTP.
+          ...(process.env.APP_BASE_URL?.startsWith("https://")
+            ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }]
+            : []),
         ],
       },
     ];
