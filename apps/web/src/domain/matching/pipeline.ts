@@ -62,7 +62,8 @@ export class MatchingPipeline {
   async run(input: MatchingInput) {
     if (input.mode === "search" && !input.query?.trim()) throw new Error("Enter a search query");
     const storedProfile = await this.participants.findProfile(input.eventId, input.participantId);
-    if (!storedProfile) throw new Error("Complete your event profile before continuing");
+    // Hidden viewers may still browse; only a saved profile is required.
+    if (!storedProfile?.profileComplete) throw new Error("Complete your event profile before continuing");
 
     const embeddingText = input.mode === "search" ? input.query!.trim() : profileText(storedProfile);
     const embedding = input.mode === "profile" && storedProfile.embedding
