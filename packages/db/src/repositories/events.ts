@@ -104,7 +104,10 @@ export async function update(input: {
 }): Promise<EventRecord | null> {
   const { rows } = await query<EventRecord>(
     `${EVENT_SELECT}
-      where e.id = $1 and exists (select 1 from event_organizers eo where eo.event_id = e.id and eo.attendee_id = $2)
+      where e.id = $1
+        and (exists (select 1 from event_organizers eo where eo.event_id = e.id and eo.attendee_id = $2)
+             or exists (select 1 from organization_members m
+                         where m.organization_id = e.organization_id and m.attendee_id = $2 and m.role in ('owner', 'admin')))
       limit 1`,
     [input.eventId, input.organizerId]
   );
@@ -121,6 +124,12 @@ export async function update(input: {
   );
   void updated;
   return findBySlug(old.organization_slug, old.slug);
+}
+
+/** Name and public slug, for notification text and links. */
+export async function basics(eventId: string): Promise<{ name: string; slug: string } | null> {
+  const { rows } = await query<{ name: string; slug: string }>(`select name, slug from events where id = $1`, [eventId]);
+  return rows[0] ?? null;
 }
 
 /** The event's status, or null when the event no longer exists. */
@@ -243,6 +252,11 @@ export async function setRevoked(eventId: string, attendeeId: string, revoked: b
       where event_id = $1 and attendee_id = $2`,
     [eventId, attendeeId, revoked]
   );
+  // Explanations written about or for a removed attendee are not kept.
+  if (revoked && rowCount) {
+    await query(`delete from pair_explanations where event_id = $1 and (viewer_id = $2 or candidate_id = $2)`, [eventId, attendeeId]);
+    await query(`delete from rerank_orders where event_id = $1 and (viewer_id = $2 or $2::uuid = any(candidate_ids))`, [eventId, attendeeId]);
+  }
   return (rowCount ?? 0) > 0;
 }
 

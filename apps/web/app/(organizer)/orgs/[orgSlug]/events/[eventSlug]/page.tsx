@@ -1,12 +1,14 @@
 import Link from "next/link";
 import SignOutButton from "@/components/ui/SignOutButton";
-import { updateEventAction } from "../../../../../actions/organizer.actions";
+import { updateEventAction, updateProfileFormAction } from "../../../../../actions/organizer.actions";
+import ProfileFormSettings from "@/components/organizer/ProfileFormSettings";
+import { readProfileForm } from "@/src/domain/participant/profile-form";
 import { requireOrganizerEvent } from "@/src/lib/auth";
 import { EventSetupForm } from "@/components/organizer/EventForms";
 
 export default async function EventDashboardPage({ params, searchParams }: {
   params: Promise<{ orgSlug: string; eventSlug: string }>;
-  searchParams: Promise<{ saved?: string }>;
+  searchParams: Promise<{ saved?: string; form?: string }>;
 }) {
   const { orgSlug, eventSlug } = await params;
   const notice = await searchParams;
@@ -36,6 +38,12 @@ export default async function EventDashboardPage({ params, searchParams }: {
     }} /> : <p className="empty-state">
       Registration is {event.status}. Only event owners and admins can change this event&apos;s settings.
     </p>}
+    {can("configure") && <>
+      <h2>Profile form</h2>
+      <p>Choose which questions attendees answer, what they are called, and which are required.</p>
+      {notice.form && <p role="status" className="notice">Profile form saved. Attendees missing a newly required answer are asked for it next time they open their profile.</p>}
+      <ProfileFormSettings action={updateProfileFormAction.bind(null, orgSlug, eventSlug)} form={readProfileForm(event.form_config)} />
+    </>}
   </main>;
 }
 
